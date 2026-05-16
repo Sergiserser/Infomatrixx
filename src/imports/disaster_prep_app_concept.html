@@ -1,0 +1,374 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); }
+  .section-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 1.5rem 0 0.75rem;
+  }
+  .phone-wrap {
+    background: var(--color-background-secondary);
+    border-radius: var(--border-radius-lg);
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .phone {
+    background: var(--color-background-primary);
+    border-radius: 24px;
+    border: 0.5px solid var(--color-border-tertiary);
+    overflow: hidden;
+    max-width: 320px;
+    margin: 0 auto;
+  }
+  .status-bar {
+    background: #CC3333;
+    color: #fff;
+    font-size: 11px;
+    padding: 6px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .screen-header {
+    background: #CC3333;
+    color: #fff;
+    padding: 12px 16px 16px;
+  }
+  .screen-header h2 { font-size: 18px; font-weight: 500; color: #fff; }
+  .screen-header p { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+  .screen-body { padding: 12px 14px; }
+
+  .alert-banner {
+    background: #fff3cd;
+    border: 0.5px solid #e6a817;
+    border-radius: var(--border-radius-md);
+    padding: 10px 12px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .alert-banner i { color: #BA7517; font-size: 18px; margin-top: 1px; }
+  .alert-banner .title { font-size: 13px; font-weight: 500; color: #633806; }
+  .alert-banner .sub { font-size: 11px; color: #854F0B; margin-top: 2px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .quick-card {
+    background: var(--color-background-secondary);
+    border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-tertiary);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .quick-card .icon-circle {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .quick-card .label { font-size: 12px; font-weight: 500; color: var(--color-text-primary); }
+  .quick-card .val { font-size: 11px; color: var(--color-text-secondary); }
+
+  .section-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; font-weight: 500; color: var(--color-text-primary);
+    margin-bottom: 8px;
+  }
+  .section-row span { font-size: 11px; color: #185FA5; }
+
+  .checklist-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    font-size: 13px;
+    color: var(--color-text-primary);
+  }
+  .checklist-item:last-child { border-bottom: none; }
+  .check-box {
+    width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--color-border-secondary);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .check-box.done { background: #1D9E75; border-color: #1D9E75; }
+  .check-box.done i { font-size: 11px; color: #fff; }
+  .checklist-item.done-text { color: var(--color-text-secondary); text-decoration: line-through; }
+
+  .sos-btn {
+    background: #CC3333; color: #fff;
+    border-radius: 50%; width: 72px; height: 72px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    margin: 0 auto 12px;
+    font-size: 11px; font-weight: 500;
+    border: none;
+    cursor: pointer;
+  }
+  .sos-btn i { font-size: 22px; }
+
+  .contact-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0; border-bottom: 0.5px solid var(--color-border-tertiary);
+  }
+  .contact-row:last-child { border-bottom: none; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 500; flex-shrink: 0;
+  }
+  .contact-info { flex: 1; }
+  .contact-info .name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+  .contact-info .role { font-size: 11px; color: var(--color-text-secondary); }
+  .call-btn { font-size: 20px; color: #1D9E75; }
+
+  .bottom-nav {
+    display: flex; border-top: 0.5px solid var(--color-border-tertiary);
+    padding: 8px 0 4px;
+  }
+  .nav-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-size: 10px; color: var(--color-text-secondary);
+  }
+  .nav-item.active { color: #CC3333; }
+  .nav-item i { font-size: 20px; }
+
+  .kit-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0; border-bottom: 0.5px solid var(--color-border-tertiary);
+  }
+  .kit-row:last-child { border-bottom: none; }
+  .kit-icon { font-size: 20px; color: #185FA5; width: 28px; text-align: center; }
+  .kit-info { flex: 1; }
+  .kit-info .name { font-size: 13px; color: var(--color-text-primary); }
+  .kit-info .qty { font-size: 11px; color: var(--color-text-secondary); }
+  .kit-status {
+    font-size: 10px; padding: 2px 7px; border-radius: 20px;
+  }
+  .ok { background: #EAF3DE; color: #3B6D11; }
+  .low { background: #FAEEDA; color: #633806; }
+  .missing { background: #FCEBEB; color: #A32D2D; }
+
+  .plan-card {
+    background: var(--color-background-secondary);
+    border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-tertiary);
+    padding: 10px 12px;
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .plan-card i { font-size: 22px; color: #185FA5; }
+  .plan-card .info { flex: 1; }
+  .plan-card .info .title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+  .plan-card .info .sub { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+  .plan-card .arrow { font-size: 16px; color: var(--color-text-secondary); }
+</style>
+
+<h2 class="sr-only">Disaster Prep & Emergency app — 4 screen concepts: Home Dashboard, Emergency SOS, Supply Kit, and Evacuation Plan</h2>
+
+<p class="section-label">Screen 1 — Home dashboard</p>
+<div class="phone-wrap">
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span><i class="ti ti-wifi" style="font-size:12px"></i> <i class="ti ti-battery" style="font-size:12px"></i></span></div>
+    <div class="screen-header">
+      <h2>SafeReady</h2>
+      <p>Bucharest · Last updated: today</p>
+    </div>
+    <div class="screen-body">
+      <div class="alert-banner">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <div>
+          <div class="title">Severe storm warning</div>
+          <div class="sub">Active until 11 PM · Tap to see details</div>
+        </div>
+      </div>
+      <div class="section-row"><span style="color:var(--color-text-primary);font-size:13px">Your readiness</span><span>Edit</span></div>
+      <div class="grid-2">
+        <div class="quick-card">
+          <div class="icon-circle" style="background:#EAF3DE"><i class="ti ti-first-aid-kit" style="color:#3B6D11;font-size:16px" aria-hidden="true"></i></div>
+          <div class="label">Supply kit</div>
+          <div class="val">82% stocked</div>
+        </div>
+        <div class="quick-card">
+          <div class="icon-circle" style="background:#E6F1FB"><i class="ti ti-map-2" style="color:#185FA5;font-size:16px" aria-hidden="true"></i></div>
+          <div class="label">Evac plan</div>
+          <div class="val">Route A set</div>
+        </div>
+        <div class="quick-card">
+          <div class="icon-circle" style="background:#FAEEDA"><i class="ti ti-users" style="color:#633806;font-size:16px" aria-hidden="true"></i></div>
+          <div class="label">Contacts</div>
+          <div class="val">5 people</div>
+        </div>
+        <div class="quick-card">
+          <div class="icon-circle" style="background:#FAECE7"><i class="ti ti-checklist" style="color:#993C1D;font-size:16px" aria-hidden="true"></i></div>
+          <div class="label">Checklist</div>
+          <div class="val">3 items left</div>
+        </div>
+      </div>
+      <div class="section-row"><span style="color:var(--color-text-primary);font-size:13px">Today's tasks</span><span>See all</span></div>
+      <div class="checklist-item done-text"><div class="check-box done"><i class="ti ti-check"></i></div>Check water supply</div>
+      <div class="checklist-item done-text"><div class="check-box done"><i class="ti ti-check"></i></div>Test emergency radio</div>
+      <div class="checklist-item"><div class="check-box"></div>Rotate food stock</div>
+      <div class="checklist-item"><div class="check-box"></div>Share plan with family</div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item active"><i class="ti ti-home" aria-hidden="true"></i>Home</div>
+      <div class="nav-item"><i class="ti ti-first-aid-kit" aria-hidden="true"></i>Kit</div>
+      <div class="nav-item"><i class="ti ti-sos" aria-hidden="true"></i>SOS</div>
+      <div class="nav-item"><i class="ti ti-map-2" aria-hidden="true"></i>Plan</div>
+      <div class="nav-item"><i class="ti ti-settings" aria-hidden="true"></i>Settings</div>
+    </div>
+  </div>
+</div>
+
+<p class="section-label">Screen 2 — Emergency SOS</p>
+<div class="phone-wrap">
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span><i class="ti ti-wifi" style="font-size:12px"></i> <i class="ti ti-battery" style="font-size:12px"></i></span></div>
+    <div class="screen-header">
+      <h2>Emergency SOS</h2>
+      <p>Hold button 3 seconds to activate</p>
+    </div>
+    <div class="screen-body">
+      <div style="text-align:center; padding: 16px 0 12px;">
+        <div class="sos-btn"><i class="ti ti-sos" aria-hidden="true"></i>SOS</div>
+        <p style="font-size:11px;color:var(--color-text-secondary)">Sends location + alert to all contacts</p>
+      </div>
+      <div class="section-row"><span style="color:var(--color-text-primary);font-size:13px">Emergency contacts</span><span>Manage</span></div>
+      <div class="contact-row">
+        <div class="avatar" style="background:#E1F5EE;color:#0F6E56">MA</div>
+        <div class="contact-info"><div class="name">Maria A.</div><div class="role">Primary contact · Mom</div></div>
+        <i class="ti ti-phone-call call-btn" aria-hidden="true"></i>
+      </div>
+      <div class="contact-row">
+        <div class="avatar" style="background:#E6F1FB;color:#185FA5">DP</div>
+        <div class="contact-info"><div class="name">Dan P.</div><div class="role">Neighbor</div></div>
+        <i class="ti ti-phone-call call-btn" aria-hidden="true"></i>
+      </div>
+      <div class="contact-row">
+        <div class="avatar" style="background:#FAEEDA;color:#633806">ER</div>
+        <div class="contact-info"><div class="name">Emergency Room</div><div class="role">Floreasca Hospital</div></div>
+        <i class="ti ti-phone-call call-btn" aria-hidden="true"></i>
+      </div>
+      <div style="margin-top:12px; background:#FCEBEB; border-radius:var(--border-radius-md); padding:10px 12px;">
+        <div style="font-size:12px;font-weight:500;color:#A32D2D;margin-bottom:4px"><i class="ti ti-broadcast" style="font-size:14px;vertical-align:-2px;margin-right:4px" aria-hidden="true"></i>National emergency</div>
+        <div style="font-size:11px;color:#791F1F">Call 112 · Fire: 081 · Police: 112</div>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item"><i class="ti ti-home" aria-hidden="true"></i>Home</div>
+      <div class="nav-item"><i class="ti ti-first-aid-kit" aria-hidden="true"></i>Kit</div>
+      <div class="nav-item active"><i class="ti ti-sos" aria-hidden="true"></i>SOS</div>
+      <div class="nav-item"><i class="ti ti-map-2" aria-hidden="true"></i>Plan</div>
+      <div class="nav-item"><i class="ti ti-settings" aria-hidden="true"></i>Settings</div>
+    </div>
+  </div>
+</div>
+
+<p class="section-label">Screen 3 — Supply kit tracker</p>
+<div class="phone-wrap">
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span><i class="ti ti-wifi" style="font-size:12px"></i> <i class="ti ti-battery" style="font-size:12px"></i></span></div>
+    <div class="screen-header">
+      <h2>Supply kit</h2>
+      <p>82% ready · 3 items need attention</p>
+    </div>
+    <div class="screen-body">
+      <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;margin-bottom:12px;">
+        <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:6px">Overall readiness</div>
+        <div style="background:var(--color-border-tertiary);border-radius:20px;height:8px;overflow:hidden;">
+          <div style="background:#1D9E75;width:82%;height:100%;border-radius:20px;"></div>
+        </div>
+        <div style="font-size:12px;color:#3B6D11;margin-top:4px;font-weight:500">82%</div>
+      </div>
+      <div class="section-row"><span style="color:var(--color-text-primary);font-size:13px">Water & food</span><span>+ Add</span></div>
+      <div class="kit-row">
+        <i class="ti ti-droplet kit-icon" aria-hidden="true"></i>
+        <div class="kit-info"><div class="name">Bottled water</div><div class="qty">12 L · expires Aug 2026</div></div>
+        <span class="kit-status ok">OK</span>
+      </div>
+      <div class="kit-row">
+        <i class="ti ti-bread kit-icon" aria-hidden="true"></i>
+        <div class="kit-info"><div class="name">Emergency rations</div><div class="qty">3 days · expires Mar 2026</div></div>
+        <span class="kit-status low">Expired</span>
+      </div>
+      <div class="section-row" style="margin-top:10px"><span style="color:var(--color-text-primary);font-size:13px">Medical</span><span>+ Add</span></div>
+      <div class="kit-row">
+        <i class="ti ti-first-aid-kit kit-icon" aria-hidden="true"></i>
+        <div class="kit-info"><div class="name">First aid kit</div><div class="qty">Complete set</div></div>
+        <span class="kit-status ok">OK</span>
+      </div>
+      <div class="kit-row">
+        <i class="ti ti-pill kit-icon" aria-hidden="true"></i>
+        <div class="kit-info"><div class="name">Prescription meds</div><div class="qty">Not added yet</div></div>
+        <span class="kit-status missing">Missing</span>
+      </div>
+      <div class="section-row" style="margin-top:10px"><span style="color:var(--color-text-primary);font-size:13px">Tools</span><span>+ Add</span></div>
+      <div class="kit-row">
+        <i class="ti ti-flashlight kit-icon" aria-hidden="true"></i>
+        <div class="kit-info"><div class="name">Flashlight + batteries</div><div class="qty">2 units</div></div>
+        <span class="kit-status ok">OK</span>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item"><i class="ti ti-home" aria-hidden="true"></i>Home</div>
+      <div class="nav-item active"><i class="ti ti-first-aid-kit" aria-hidden="true"></i>Kit</div>
+      <div class="nav-item"><i class="ti ti-sos" aria-hidden="true"></i>SOS</div>
+      <div class="nav-item"><i class="ti ti-map-2" aria-hidden="true"></i>Plan</div>
+      <div class="nav-item"><i class="ti ti-settings" aria-hidden="true"></i>Settings</div>
+    </div>
+  </div>
+</div>
+
+<p class="section-label">Screen 4 — Evacuation plan</p>
+<div class="phone-wrap">
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span><i class="ti ti-wifi" style="font-size:12px"></i> <i class="ti ti-battery" style="font-size:12px"></i></span></div>
+    <div class="screen-header">
+      <h2>Evacuation plan</h2>
+      <p>Prepared for 5 disaster types</p>
+    </div>
+    <div class="screen-body">
+      <div class="plan-card">
+        <i class="ti ti-map-2" aria-hidden="true"></i>
+        <div class="info"><div class="title">Route A — Primary exit</div><div class="sub">Via Calea Victoriei → Piața Unirii shelter</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+      <div class="plan-card">
+        <i class="ti ti-map-pin" aria-hidden="true"></i>
+        <div class="info"><div class="title">Meeting point</div><div class="sub">Parcul Cișmigiu — main fountain</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+      <div class="plan-card">
+        <i class="ti ti-building-hospital" aria-hidden="true"></i>
+        <div class="info"><div class="title">Nearest shelter</div><div class="sub">Liceul Teoretic No. 1 · 1.2 km away</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+      <div class="section-row" style="margin-top:4px"><span style="color:var(--color-text-primary);font-size:13px">Plan for each disaster</span><span>Edit all</span></div>
+      <div class="plan-card">
+        <i class="ti ti-flame" style="color:#CC3333;font-size:22px" aria-hidden="true"></i>
+        <div class="info"><div class="title">Fire</div><div class="sub">Floor plan + 2 exits mapped</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+      <div class="plan-card">
+        <i class="ti ti-ripple" style="color:#185FA5;font-size:22px" aria-hidden="true"></i>
+        <div class="info"><div class="title">Flood</div><div class="sub">High-ground route selected</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+      <div class="plan-card">
+        <i class="ti ti-atom-2" style="color:#854F0B;font-size:22px" aria-hidden="true"></i>
+        <div class="info"><div class="title">Earthquake</div><div class="sub">Shelter-in-place protocol set</div></div>
+        <i class="ti ti-chevron-right arrow" aria-hidden="true"></i>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item"><i class="ti ti-home" aria-hidden="true"></i>Home</div>
+      <div class="nav-item"><i class="ti ti-first-aid-kit" aria-hidden="true"></i>Kit</div>
+      <div class="nav-item"><i class="ti ti-sos" aria-hidden="true"></i>SOS</div>
+      <div class="nav-item active"><i class="ti ti-map-2" aria-hidden="true"></i>Plan</div>
+      <div class="nav-item"><i class="ti ti-settings" aria-hidden="true"></i>Settings</div>
+    </div>
+  </div>
+</div>
