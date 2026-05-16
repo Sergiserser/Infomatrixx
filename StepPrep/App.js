@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, SafeAreaView, StatusBar, Alert, Animated,
   Modal, KeyboardAvoidingView, Platform, Dimensions,
-  FlatList, Pressable,
+  FlatList, Pressable, Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -120,57 +120,69 @@ function GhostButton({ label, onPress, t, style }) {
   );
 }
 
-// ── Input Modal ───────────────────────────────────────────────────
+// ── Input Modal (web-compatible overlay) ─────────────────────────
 function InputModal({ visible, title, fields, onSubmit, onCancel, t }) {
   const [vals, setVals] = useState({});
   useEffect(() => { if (visible) setVals({}) }, [visible]);
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="slide">
-      <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{ flex:1, justifyContent:'flex-end' }}>
-        <Pressable style={{ flex:1 }} onPress={onCancel} />
-        <View style={{ backgroundColor:t.bg, borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, borderTopWidth:1, borderColor:t.border }}>
-          <View style={{ width:36, height:4, backgroundColor:t.border, borderRadius:2, alignSelf:'center', marginBottom:16 }} />
-          <Text style={{ fontSize:18, fontWeight:'700', color:t.text, textAlign:'center', marginBottom:18 }}>{title}</Text>
-          {fields.map(f => (
-            <View key={f.id} style={{ marginBottom:12 }}>
-              <Text style={{ fontSize:12, color:t.text2, fontWeight:'500', marginBottom:5 }}>{f.label}</Text>
-              <TextInput
-                placeholder={f.placeholder}
-                placeholderTextColor={t.text2}
-                value={vals[f.id]||''}
-                onChangeText={v => setVals(prev => ({...prev, [f.id]:v}))}
-                secureTextEntry={f.secure||false}
-                style={{ borderWidth:1.5, borderColor:t.border, borderRadius:8, padding:11, fontSize:14, color:t.text, backgroundColor:t.bg2 }}
-              />
-            </View>
-          ))}
-          <View style={{ flexDirection:'row', gap:10, marginTop:8 }}>
-            <GhostButton label="Cancel" onPress={onCancel} t={t} style={{ flex:1 }} />
-            <PrimaryButton label="Save" onPress={() => onSubmit(vals)} t={t} style={{ flex:1 }} />
+    <View style={{ position:'absolute', top:0, left:0, right:0, bottom:0,
+      backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end',
+      zIndex:999 }}>
+      <TouchableOpacity style={{ flex:1 }} onPress={onCancel} activeOpacity={1} />
+      <View style={{ backgroundColor:t.bg, borderTopLeftRadius:20, borderTopRightRadius:20,
+        padding:20, borderTopWidth:1, borderColor:t.border }}>
+        <View style={{ width:36, height:4, backgroundColor:t.border, borderRadius:2,
+          alignSelf:'center', marginBottom:16 }} />
+        <Text style={{ fontSize:18, fontWeight:'700', color:t.text,
+          textAlign:'center', marginBottom:18 }}>{title}</Text>
+        {fields.map(f => (
+          <View key={f.id} style={{ marginBottom:12 }}>
+            <Text style={{ fontSize:12, color:t.text2, fontWeight:'500', marginBottom:5 }}>{f.label}</Text>
+            <TextInput
+              placeholder={f.placeholder}
+              placeholderTextColor={t.text2}
+              value={vals[f.id]||''}
+              onChangeText={v => setVals(prev => ({...prev, [f.id]:v}))}
+              secureTextEntry={f.secure||false}
+              autoFocus={false}
+              style={{ borderWidth:1.5, borderColor:t.border, borderRadius:8,
+                padding:11, fontSize:14, color:t.text, backgroundColor:t.bg2 }}
+            />
           </View>
+        ))}
+        <View style={{ flexDirection:'row', gap:10, marginTop:8 }}>
+          <GhostButton label="Cancel" onPress={onCancel} t={t} style={{ flex:1 }} />
+          <PrimaryButton label="Save" onPress={() => { onSubmit(vals); }} t={t} style={{ flex:1 }} />
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      </View>
+    </View>
   );
 }
 
-// ── Confirm Modal ─────────────────────────────────────────────────
+// ── Confirm Modal (web-compatible) ────────────────────────────────
 function ConfirmModal({ visible, message, onConfirm, onCancel, t }) {
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={{ flex:1, backgroundColor:'rgba(0,0,0,.5)', justifyContent:'center', alignItems:'center', padding:24 }}>
-        <View style={{ backgroundColor:t.bg, borderRadius:16, padding:24, width:'100%', maxWidth:300, borderWidth:1, borderColor:t.border }}>
-          <Text style={{ fontSize:16, fontWeight:'700', color:t.text, textAlign:'center', marginBottom:6 }}>{message}</Text>
-          <Text style={{ fontSize:13, color:t.text2, textAlign:'center', marginBottom:20 }}>This cannot be undone.</Text>
-          <View style={{ flexDirection:'row', gap:10 }}>
-            <GhostButton label="Cancel" onPress={onCancel} t={t} style={{ flex:1 }} />
-            <TouchableOpacity onPress={onConfirm} style={{ flex:1, backgroundColor:t.danger, borderRadius:10, paddingVertical:13, alignItems:'center' }}>
-              <Text style={{ color:'#fff', fontWeight:'700', fontSize:15 }}>Delete</Text>
-            </TouchableOpacity>
-          </View>
+    <View style={{ position:'absolute', top:0, left:0, right:0, bottom:0,
+      backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center',
+      alignItems:'center', padding:24, zIndex:999 }}>
+      <View style={{ backgroundColor:t.bg, borderRadius:16, padding:24,
+        width:'100%', maxWidth:300, borderWidth:1, borderColor:t.border }}>
+        <Text style={{ fontSize:16, fontWeight:'700', color:t.text,
+          textAlign:'center', marginBottom:6 }}>{message}</Text>
+        <Text style={{ fontSize:13, color:t.text2,
+          textAlign:'center', marginBottom:20 }}>This cannot be undone.</Text>
+        <View style={{ flexDirection:'row', gap:10 }}>
+          <GhostButton label="Cancel" onPress={onCancel} t={t} style={{ flex:1 }} />
+          <TouchableOpacity onPress={onConfirm}
+            style={{ flex:1, backgroundColor:t.danger, borderRadius:10,
+              paddingVertical:13, alignItems:'center' }}>
+            <Text style={{ color:'#fff', fontWeight:'700', fontSize:15 }}>Delete</Text>
+          </TouchableOpacity>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -199,8 +211,8 @@ function HomeScreen({ data, setData, t }) {
   }
 
   function addTask(vals) {
-    if (!vals.f0) return;
-    setData(d => ({...d, tasks:[...d.tasks,{id:Date.now()+'',text:vals.f0,done:false}]}));
+    if (!vals || !vals.f0 || !vals.f0.trim()) return;
+    setData(d => ({...d, tasks:[...d.tasks,{id:Date.now()+'',text:vals.f0.trim(),done:false}]}));
     setModal(false);
   }
 
@@ -210,6 +222,7 @@ function HomeScreen({ data, setData, t }) {
   }
 
   return (
+    <View style={{ flex:1 }}>
     <ScrollView style={{ flex:1, backgroundColor:t.bg }} contentContainerStyle={{ padding:16, paddingBottom:20 }} showsVerticalScrollIndicator={false}>
 
       {/* Alert banner */}
@@ -261,9 +274,10 @@ function HomeScreen({ data, setData, t }) {
         </TouchableOpacity>
       ))}
 
-      <InputModal visible={modal} title="New Task" fields={[{id:'f0',label:'Description',placeholder:'e.g. Check water supply'}]} onSubmit={addTask} onCancel={()=>setModal(false)} t={t} />
-      {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
     </ScrollView>
+    <InputModal visible={modal} title="New Task" fields={[{id:'f0',label:'Description',placeholder:'e.g. Check water supply'}]} onSubmit={addTask} onCancel={()=>setModal(false)} t={t} />
+    {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
+    </View>
   );
 }
 
@@ -284,8 +298,8 @@ function KitScreen({ data, setData, t }) {
   }
 
   function addSupply(vals) {
-    if (!vals.f0) return;
-    setData(d => ({...d, supplies:[...d.supplies,{id:Date.now()+'',name:vals.f0,qty:vals.f1||'',status:'ok',cat:vals.f2||'tools'}]}));
+    if (!vals || !vals.f0 || !vals.f0.trim()) return;
+    setData(d => ({...d, supplies:[...d.supplies,{id:Date.now()+'',name:vals.f0.trim(),qty:(vals.f1||'').trim(),status:'ok',cat:(vals.f2||'').trim()||'tools'}]}));
     setModal(false);
   }
 
@@ -298,6 +312,7 @@ function KitScreen({ data, setData, t }) {
   const pct = data.supplies.length ? Math.round(ok/data.supplies.length*100) : 0;
 
   return (
+    <View style={{ flex:1 }}>
     <ScrollView style={{ flex:1, backgroundColor:t.bg }} contentContainerStyle={{ padding:16, paddingBottom:20 }} showsVerticalScrollIndicator={false}>
       <SectionHeader title="Supply Kit" action={()=>setModal(true)} actionLabel="+ Add" t={t} />
 
@@ -343,13 +358,14 @@ function KitScreen({ data, setData, t }) {
 
       {!data.supplies.length && <Text style={{ color:t.text2, fontSize:14, textAlign:'center', paddingVertical:30 }}>Kit is empty — tap + Add to start</Text>}
 
-      <InputModal visible={modal} title="Add Supply" fields={[
-        {id:'f0',label:'Item name',placeholder:'e.g. Bottled water'},
-        {id:'f1',label:'Quantity',placeholder:'e.g. 12 L'},
-        {id:'f2',label:'Category',placeholder:'water-food / medical / tools'},
-      ]} onSubmit={addSupply} onCancel={()=>setModal(false)} t={t} />
-      {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
     </ScrollView>
+    <InputModal visible={modal} title="Add Supply" fields={[
+      {id:'f0',label:'Item name',placeholder:'e.g. Bottled water'},
+      {id:'f1',label:'Quantity',placeholder:'e.g. 12 L'},
+      {id:'f2',label:'Category',placeholder:'water-food / medical / tools'},
+    ]} onSubmit={addSupply} onCancel={()=>setModal(false)} t={t} />
+    {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
+    </View>
   );
 }
 
@@ -391,8 +407,9 @@ function SOSScreen({ data, setData, t }) {
   }
 
   function addContact(vals) {
-    if (!vals.f0) return;
-    setData(d => ({...d, contacts:[...d.contacts,{id:Date.now()+'',name:vals.f0,phone:vals.f1||'',role:vals.f2||'',initials:vals.f0.split(' ').map(x=>x[0]).join('').toUpperCase().slice(0,2),primary:false}]}));
+    if (!vals || !vals.f0 || !vals.f0.trim()) return;
+    const name = vals.f0.trim();
+    setData(d => ({...d, contacts:[...d.contacts,{id:Date.now()+'',name,phone:(vals.f1||'').trim(),role:(vals.f2||'').trim(),initials:name.split(' ').map(x=>x[0]).join('').toUpperCase().slice(0,2)||'?',primary:false}]}));
     setModal(false);
   }
 
@@ -402,6 +419,7 @@ function SOSScreen({ data, setData, t }) {
   }
 
   return (
+    <View style={{ flex:1 }}>
     <ScrollView style={{ flex:1, backgroundColor:t.bg }} contentContainerStyle={{ padding:16, paddingBottom:20 }} showsVerticalScrollIndicator={false}>
 
       {/* SOS Button */}
@@ -449,13 +467,14 @@ function SOSScreen({ data, setData, t }) {
         </View>
       ))}
 
-      <InputModal visible={modal} title="New Contact" fields={[
-        {id:'f0',label:'Name',placeholder:'Full name'},
-        {id:'f1',label:'Phone',placeholder:'+1 555 000 0000'},
-        {id:'f2',label:'Role',placeholder:'e.g. Family, Neighbour'},
-      ]} onSubmit={addContact} onCancel={()=>setModal(false)} t={t} />
-      {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
     </ScrollView>
+    <InputModal visible={modal} title="New Contact" fields={[
+      {id:'f0',label:'Name',placeholder:'Full name'},
+      {id:'f1',label:'Phone',placeholder:'+1 555 000 0000'},
+      {id:'f2',label:'Role',placeholder:'e.g. Family, Neighbour'},
+    ]} onSubmit={addContact} onCancel={()=>setModal(false)} t={t} />
+    {confirm && <ConfirmModal visible message={confirm.msg} onConfirm={confirm.cb} onCancel={()=>setConfirm(null)} t={t} />}
+    </View>
   );
 }
 
@@ -542,6 +561,511 @@ function SettingsScreen({ data, setData, themeName, setThemeName, t }) {
   );
 }
 
+// ── AI SCOUT ─────────────────────────────────────────────────────
+function AIScreen({ data, setData, t }) {
+  const [key, setKey]       = useState(data.gemini_key || '');
+  const [region, setRegion] = useState(data.gemini_region || '');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState(null);
+  const [saved, setSaved]     = useState(!!data.gemini_key);
+
+  async function scan() {
+    if (!key.trim() || !region.trim()) {
+      Alert.alert('Missing info', 'Enter both API key and region first.');
+      return;
+    }
+    setLoading(true); setResult(null);
+    try {
+      const prompt = `You are a disaster preparedness expert. For the region "${region}", return ONLY a JSON object with "kit" (array of 8-12 supply item strings) and "tasks" (array of 6-10 task strings). No explanation, just JSON.`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key.trim()}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message);
+      let text = json.candidates[0].content.parts[0].text.trim();
+      if (text.includes('```')) text = text.split('```')[1].replace(/^json/, '').trim();
+      const parsed = JSON.parse(text);
+      // Add to data
+      const newKit   = (parsed.kit   || []).filter(x => typeof x === 'string' && x.trim());
+      const newTasks = (parsed.tasks || []).filter(x => typeof x === 'string' && x.trim());
+      setData(d => ({
+        ...d,
+        gemini_key: key.trim(), gemini_region: region.trim(),
+        supplies: [...d.supplies, ...newKit.map((name,i)   => ({ id: Date.now()+i+'k', name: name.trim(), qty:'', status:'ok', cat:'tools' }))],
+        tasks:    [...d.tasks,    ...newTasks.map((text,i)  => ({ id: Date.now()+i+'t', text: text.trim(), done: false }))],
+      }));
+      setResult({ kit: newKit, tasks: newTasks });
+      setSaved(true);
+    } catch(e) {
+      Alert.alert('Error', e.message || 'Could not reach Gemini. Check your API key.');
+    }
+    setLoading(false);
+  }
+
+  return (
+    <ScrollView style={{ flex:1, backgroundColor:t.bg }} contentContainerStyle={{ padding:16, paddingBottom:30 }} showsVerticalScrollIndicator={false}>
+      <Text style={{ fontSize:19, fontWeight:'700', color:t.text, marginBottom:4 }}>AI Hazard Scout</Text>
+      <Text style={{ fontSize:13, color:t.text2, marginBottom:20 }}>Gemini detects hazards for your region and auto-fills your Kit & Tasks.</Text>
+
+      {/* API Key */}
+      <Text style={{ fontSize:12, fontWeight:'600', color:t.text2, marginBottom:6, textTransform:'uppercase', letterSpacing:.5 }}>Gemini API Key</Text>
+      <TextInput
+        value={key}
+        onChangeText={setKey}
+        placeholder="AIza... (get free at aistudio.google.com)"
+        placeholderTextColor={t.text2}
+        secureTextEntry
+        style={{ borderWidth:1.5, borderColor:t.border, borderRadius:10, padding:12, fontSize:14, color:t.text, backgroundColor:t.bg2, marginBottom:14 }}
+      />
+
+      {/* Region */}
+      <Text style={{ fontSize:12, fontWeight:'600', color:t.text2, marginBottom:6, textTransform:'uppercase', letterSpacing:.5 }}>Your Region</Text>
+      <TextInput
+        value={region}
+        onChangeText={setRegion}
+        placeholder="e.g. Kyiv, California, Tokyo..."
+        placeholderTextColor={t.text2}
+        style={{ borderWidth:1.5, borderColor:t.border, borderRadius:10, padding:12, fontSize:14, color:t.text, backgroundColor:t.bg2, marginBottom:16 }}
+      />
+
+      <TouchableOpacity onPress={scan} disabled={loading}
+        style={{ backgroundColor: loading ? t.text2 : t.accent, borderRadius:10, paddingVertical:14, alignItems:'center', marginBottom:20 }}>
+        <Text style={{ color:'#fff', fontWeight:'700', fontSize:15 }}>{loading ? 'Scanning...' : '🔍  Scan My Region'}</Text>
+      </TouchableOpacity>
+
+      {result && (
+        <View>
+          <View style={{ backgroundColor:alpha(t.success,.1), borderRadius:10, padding:14, borderWidth:1, borderColor:alpha(t.success,.3), marginBottom:10 }}>
+            <Text style={{ fontSize:14, fontWeight:'700', color:t.success, marginBottom:8 }}>✅ Added {result.kit.length} kit items</Text>
+            {result.kit.map((k,i) => <Text key={i} style={{ fontSize:13, color:t.text, marginBottom:3 }}>• {k}</Text>)}
+          </View>
+          <View style={{ backgroundColor:alpha(t.accent,.1), borderRadius:10, padding:14, borderWidth:1, borderColor:alpha(t.accent,.3) }}>
+            <Text style={{ fontSize:14, fontWeight:'700', color:t.accent, marginBottom:8 }}>✅ Added {result.tasks.length} tasks</Text>
+            {result.tasks.map((t2,i) => <Text key={i} style={{ fontSize:13, color:t.text, marginBottom:3 }}>• {t2}</Text>)}
+          </View>
+        </View>
+      )}
+
+      {/* Info box */}
+      {!result && (
+        <View style={{ backgroundColor:t.bg2, borderRadius:10, padding:14, borderWidth:1, borderColor:t.border }}>
+          <Text style={{ fontSize:13, fontWeight:'600', color:t.text, marginBottom:6 }}>How it works:</Text>
+          <Text style={{ fontSize:12, color:t.text2, lineHeight:20 }}>1. Enter your Gemini API key (free at aistudio.google.com){'\n'}2. Type your region or city{'\n'}3. Tap Scan — Gemini returns hazards for your area{'\n'}4. Kit items and tasks are automatically added to your app</Text>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+// ── THREAT LABELS ────────────────────────────────────────────────
+const THREAT_LABELS = {
+  FIST_FACE:'Fist → Face', FIST_BODY:'Fist → Body',
+  FIST_FIST:'Fist Collision', GUN_POSE:'Gun Pose Detected',
+  ARM_SWING:'Aggressive Arm Swing', THREAT_STANCE:'Threatening Stance',
+  PUNCH:'Punch Motion', PERSON_COLLISION:'Persons Too Close',
+  INTRUDER:'⚠ Intruder Detected', MOTION:'⚠ Motion Detected',
+  LOITER:'⚠ Person Loitering', ZONE_BREACH:'⚠ Zone Breached',
+};
+
+// ── LIVE FEED (MJPEG via rapid Image refresh) ─────────────────────
+function LiveFeed({ url, t }) {
+  const [ts,  setTs]  = useState(Date.now());
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    setErr(false);
+    const iv = setInterval(() => setTs(Date.now()), 150);
+    return () => clearInterval(iv);
+  }, [url]);
+  if (err) return (
+    <View style={{ flex:1, alignItems:'center', justifyContent:'center', padding:20 }}>
+      <Text style={{ fontSize:30, marginBottom:8 }}>📷</Text>
+      <Text style={{ color:'#fff', fontSize:13, textAlign:'center', opacity:.7 }}>
+        Feed unavailable{'\n'}Check server is running
+      </Text>
+    </View>
+  );
+  return (
+    <Image
+      source={{ uri:`${url}?t=${ts}`, headers:{ 'Cache-Control':'no-cache' } }}
+      style={{ width:'100%', height:'100%' }}
+      resizeMode="contain"
+      onError={() => setErr(true)}
+      onLoad={() => setErr(false)}
+    />
+  );
+}
+
+// ── CAMERA / THREAT DETECTOR SCREEN ──────────────────────────────
+function CameraScreen({ t, data, setData }) {
+  const [serverIP,   setServerIP]   = useState('localhost');
+  const [connected,  setConnected]  = useState(false);
+  const [status,     setStatus]     = useState(null);
+  const [awayMode,   setAwayMode]   = useState(false);
+  const [snapshots,  setSnapshots]  = useState([]);
+  const [activeTab,  setActiveTab]  = useState('live');
+  const prevSosRef  = React.useRef(0);
+  const pollRef     = React.useRef(null);
+  const snapPollRef = React.useRef(null);
+
+  // Accept: "192.168.1.5", "localhost", "http://192.168.1.5:5050", etc.
+  function buildBase(input) {
+    const s = (input || '').trim();
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      // Strip trailing slash and any path
+      return s.replace(/\/+$/, '').split('/').slice(0,3).join('/');
+    }
+    // bare IP or hostname — add port 5050
+    const host = s.replace(/:.*/, ''); // strip any port user typed
+    return `http://${host}:5050`;
+  }
+
+  const base      = buildBase(serverIP);
+  const videoURL  = `${base}/video`;
+  const statusURL = `${base}/api/status`;   // /api/* has guaranteed CORS headers
+  const awayURL   = `${base}/api/away`;
+  const snapsURL  = `${base}/api/snapshots`;
+
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 2500);
+        const r = await fetch(statusURL, { signal: ctrl.signal, mode:'cors' });
+        clearTimeout(tid);
+        const s = await r.json();
+        setStatus(s);
+        setConnected(true);
+        setAwayMode(!!s.away_mode);
+        // Auto-add task if new SOS fired
+        if ((s.sos_count || 0) > prevSosRef.current) {
+          prevSosRef.current = s.sos_count;
+          setData(d => ({...d,
+            tasks:[...d.tasks, {id:Date.now()+'', text:`🚨 ${s.sos_reason}`, done:false}]
+          }));
+        }
+      } catch {
+        setConnected(false);
+        setStatus(null);
+      }
+    }, 1000);
+
+    // Snapshot polling
+    if (snapPollRef.current) clearInterval(snapPollRef.current);
+    snapPollRef.current = setInterval(async () => {
+      try {
+        const ctrl2 = new AbortController();
+        const tid2 = setTimeout(() => ctrl2.abort(), 2000);
+        const r = await fetch(snapsURL, { signal: ctrl2.signal, mode:'cors' });
+        clearTimeout(tid2);
+        const d = await r.json();
+        setSnapshots((d.snapshots || []).reverse().slice(0, 8));
+      } catch {}
+    }, 3000);
+  }
+
+  function stopPolling() {
+    if (pollRef.current)     { clearInterval(pollRef.current);     pollRef.current=null; }
+    if (snapPollRef.current) { clearInterval(snapPollRef.current); snapPollRef.current=null; }
+    setConnected(false); setStatus(null);
+  }
+
+  React.useEffect(() => () => stopPolling(), []);
+
+  async function toggleAway() {
+    const next = !awayMode;
+    try {
+      await fetch(awayURL, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ active: next }),
+        mode:'cors',
+      });
+      setAwayMode(next);
+    } catch { Alert.alert('Error', 'Cannot reach server'); }
+  }
+
+  const hasThreats  = status?.confirmed?.length > 0;
+  const awayAlert   = status?.away_alert;
+  const peopleCount = status?.people_count || 0;
+  const motionPct   = Math.min(100, ((status?.motion_level || 0) / 15000) * 100);
+
+  // ── Sub-tab buttons ─────────────────────────────────────────────
+  function TabBtn({ id, label }) {
+    const active = activeTab === id;
+    return (
+      <TouchableOpacity onPress={() => setActiveTab(id)} style={{ flex:1, paddingVertical:8,
+        alignItems:'center', backgroundColor: active ? t.accent : t.bg2,
+        borderRadius:8, marginHorizontal:2 }}>
+        <Text style={{ fontSize:12, fontWeight:'700', color: active ? '#fff' : t.text2 }}>{label}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <ScrollView style={{ flex:1, backgroundColor:t.bg }}
+      contentContainerStyle={{ padding:14, paddingBottom:30 }}
+      showsVerticalScrollIndicator={false}>
+
+      {/* Title */}
+      <Text style={{ fontSize:18, fontWeight:'700', color:t.text, marginBottom:4 }}>Threat Detector</Text>
+      <Text style={{ fontSize:12, color:t.text2, marginBottom:14 }}>
+        Connects to threat_server.py on your PC via WiFi
+      </Text>
+
+      {/* Quick fill buttons */}
+      <View style={{ flexDirection:'row', gap:8, marginBottom:8 }}>
+        <Text style={{ fontSize:12, color:t.text2, alignSelf:'center' }}>Quick:</Text>
+        {['localhost','192.168.1.1'].map(ip => (
+          <TouchableOpacity key={ip} onPress={() => setServerIP(ip)}
+            style={{ backgroundColor:t.bg2, borderRadius:6, paddingHorizontal:10, paddingVertical:5,
+              borderWidth:1, borderColor:serverIP===ip?t.accent:t.border }}>
+            <Text style={{ fontSize:12, color:serverIP===ip?t.accent:t.text2 }}>{ip}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* IP + Connect */}
+      <View style={{ flexDirection:'row', gap:8, marginBottom:12 }}>
+        <TextInput value={serverIP} onChangeText={setServerIP}
+          placeholder="localhost  or  192.168.1.5"
+          placeholderTextColor={t.text2}
+          autoCapitalize="none" autoCorrect={false}
+          style={{ flex:1, borderWidth:1.5, borderColor:connected?t.success:t.border,
+            borderRadius:10, padding:11, fontSize:13, color:t.text, backgroundColor:t.bg2 }} />
+        <TouchableOpacity onPress={connected ? stopPolling : startPolling}
+          style={{ backgroundColor: connected ? t.danger : t.accent,
+            borderRadius:10, paddingHorizontal:16, justifyContent:'center' }}>
+          <Text style={{ color:'#fff', fontWeight:'700', fontSize:14 }}>
+            {connected ? 'Stop' : 'Connect'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={{ fontSize:11, color:t.text2, marginBottom:8, marginTop:-6 }}>
+        Connecting to: <Text style={{ color:t.accent }}>{base}</Text>
+        {'  '}
+        <Text style={{ color:t.text2 }}>
+          (use localhost if server is on this same PC)
+        </Text>
+      </Text>
+
+      {/* Status row */}
+      <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:12,
+        backgroundColor:t.bg2, borderRadius:10, padding:11,
+        borderWidth:1, borderColor: connected ? t.success : t.border }}>
+        <View style={{ width:9, height:9, borderRadius:5,
+          backgroundColor: connected ? t.success : t.danger }} />
+        <Text style={{ fontSize:13, color:t.text, fontWeight:'500', flex:1 }}>
+          {connected
+            ? `Connected · ${status?.fps||0} FPS · ${peopleCount} person${peopleCount!==1?'s':''}`
+            : 'Not connected — enter PC IP and tap Connect'}
+        </Text>
+        {connected && <Text style={{ fontSize:12, color:t.text2 }}>SOS: {status?.sos_count||0}</Text>}
+      </View>
+
+      {/* Threat / away alert banner */}
+      {connected && (hasThreats || awayAlert) && (
+        <View style={{ backgroundColor:alpha(t.danger,.12), borderRadius:12, padding:14,
+          borderWidth:2, borderColor:t.danger, marginBottom:12 }}>
+          <Text style={{ fontSize:16, fontWeight:'800', color:t.danger, marginBottom:6 }}>
+            🚨  {awayAlert ? 'INTRUDER ALERT' : 'THREAT DETECTED'}
+          </Text>
+          {(status?.confirmed||[]).map((k,i) => (
+            <Text key={i} style={{ fontSize:13, color:t.danger, marginTop:2 }}>
+              • {THREAT_LABELS[k]||k}
+            </Text>
+          ))}
+        </View>
+      )}
+
+      {connected && !hasThreats && !awayAlert && (
+        <View style={{ backgroundColor:alpha(t.success,.1), borderRadius:10, padding:11,
+          borderWidth:1, borderColor:t.success, marginBottom:12,
+          flexDirection:'row', alignItems:'center', gap:8 }}>
+          <Text style={{ fontSize:14, fontWeight:'700', color:t.success }}>
+            ✓  {awayMode ? 'Away Mode Armed — Watching' : 'All Clear — Monitoring'}
+          </Text>
+        </View>
+      )}
+
+      {/* Sub tabs */}
+      {connected && (
+        <View style={{ flexDirection:'row', marginBottom:12 }}>
+          <TabBtn id="live"  label="📹 Live Feed" />
+          <TabBtn id="away"  label="🏠 Away Mode" />
+          <TabBtn id="log"   label="📋 Log" />
+          <TabBtn id="snaps" label="📸 Snaps" />
+        </View>
+      )}
+
+      {/* ── LIVE TAB ── */}
+      {connected && activeTab==='live' && (
+        <View>
+          <View style={{ borderRadius:12, overflow:'hidden', borderWidth:1, borderColor:t.border,
+            backgroundColor:'#000', aspectRatio:16/9 }}>
+            <LiveFeed url={videoURL} t={t} />
+          </View>
+          <Text style={{ fontSize:11, color:t.text2, marginTop:6, textAlign:'center' }}>
+            Tip: if feed is black, open{' '}
+            <Text style={{ color:t.accent }}>{videoURL}</Text>
+            {' '}directly in your browser to test
+          </Text>
+        </View>
+      )}
+
+      {/* ── AWAY MODE TAB ── */}
+      {connected && activeTab==='away' && (
+        <View>
+          {/* Arm/Disarm button */}
+          <TouchableOpacity onPress={toggleAway} style={{
+            backgroundColor: awayMode ? alpha(t.danger,.15) : t.accent,
+            borderRadius:12, padding:18, alignItems:'center', marginBottom:12,
+            borderWidth:2, borderColor: awayMode ? t.danger : t.accent }}>
+            <Text style={{ fontSize:22, marginBottom:4 }}>{awayMode ? '🔴' : '🏠'}</Text>
+            <Text style={{ fontSize:16, fontWeight:'800',
+              color: awayMode ? t.danger : '#fff' }}>
+              {awayMode ? 'DISARM Away Mode' : 'ARM Away Mode'}
+            </Text>
+            <Text style={{ fontSize:12, color: awayMode ? t.danger : 'rgba(255,255,255,.7)',
+              marginTop:4 }}>
+              {awayMode ? 'Tap to disarm — you are back home' : 'Tap to arm — alerts if anyone enters'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Motion level */}
+          <View style={{ backgroundColor:t.bg2, borderRadius:12, padding:14,
+            borderWidth:1, borderColor:t.border, marginBottom:10 }}>
+            <Text style={{ fontSize:12, fontWeight:'600', color:t.text2,
+              textTransform:'uppercase', letterSpacing:.5, marginBottom:10 }}>Motion Level</Text>
+            <View style={{ backgroundColor:t.border, borderRadius:4, height:10, overflow:'hidden' }}>
+              <View style={{ height:'100%', width:`${motionPct}%`, borderRadius:4,
+                backgroundColor: motionPct>60?t.danger:motionPct>30?t.warning:t.accent }} />
+            </View>
+            <Text style={{ fontSize:11, color:t.text2, marginTop:5 }}>
+              {status?.motion_level||0} px detected
+            </Text>
+          </View>
+
+          {/* People count */}
+          <View style={{ backgroundColor:t.bg2, borderRadius:12, padding:14,
+            borderWidth:1, borderColor: awayMode&&peopleCount>0?t.danger:t.border,
+            flexDirection:'row', alignItems:'center', gap:12 }}>
+            <Text style={{ fontSize:36, fontWeight:'800',
+              color: awayMode&&peopleCount>0?t.danger:t.text }}>
+              {peopleCount}
+            </Text>
+            <View>
+              <Text style={{ fontSize:14, fontWeight:'600', color:t.text }}>
+                {peopleCount===0 ? 'No one detected' :
+                 peopleCount===1 ? 'Person detected' : `${peopleCount} people detected`}
+              </Text>
+              <Text style={{ fontSize:12, color: awayMode&&peopleCount>0?t.danger:t.text2, marginTop:2 }}>
+                {awayMode&&peopleCount>0 ? '⚠ Intruder alert!' : awayMode ? 'Area clear' : 'Away mode disarmed'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Away mode info */}
+          <View style={{ backgroundColor:alpha(t.accent,.07), borderRadius:10, padding:12,
+            borderWidth:1, borderColor:alpha(t.accent,.2), marginTop:10 }}>
+            <Text style={{ fontSize:13, fontWeight:'600', color:t.accent, marginBottom:6 }}>
+              Away Mode detects:
+            </Text>
+            {['Any motion in frame','Any person appearing (intruder)','Person staying 8+ seconds (loiter)','Gun pose or aggressive movement'].map((s,i) => (
+              <Text key={i} style={{ fontSize:12, color:t.text2, marginTop:3 }}>• {s}</Text>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* ── LOG TAB ── */}
+      {connected && activeTab==='log' && (
+        <View style={{ backgroundColor:t.bg2, borderRadius:12, padding:14,
+          borderWidth:1, borderColor:t.border }}>
+          <Text style={{ fontSize:14, fontWeight:'700', color:t.text, marginBottom:12 }}>
+            SOS Event Log ({status?.sos_count||0} total)
+          </Text>
+          {(status?.sos_log||[]).length===0
+            ? <Text style={{ fontSize:13, color:t.text2, textAlign:'center', paddingVertical:20 }}>
+                No events yet
+              </Text>
+            : [...(status?.sos_log||[])].reverse().map((e,i,arr) => (
+              <View key={i} style={{ flexDirection:'row', gap:10, paddingVertical:8,
+                borderBottomWidth:i<arr.length-1?1:0, borderColor:t.border }}>
+                <View style={{ width:8, height:8, borderRadius:4,
+                  backgroundColor:t.danger, marginTop:4, flexShrink:0 }} />
+                <View style={{ flex:1 }}>
+                  <Text style={{ fontSize:11, color:t.accent, fontWeight:'600' }}>{e.time}</Text>
+                  <Text style={{ fontSize:13, color:t.text, marginTop:2 }}>{e.reason}</Text>
+                </View>
+              </View>
+            ))
+          }
+        </View>
+      )}
+
+      {/* ── SNAPSHOTS TAB ── */}
+      {connected && activeTab==='snaps' && (
+        <View>
+          <Text style={{ fontSize:14, fontWeight:'700', color:t.text, marginBottom:12 }}>
+            Saved Snapshots
+          </Text>
+          {snapshots.length === 0
+            ? <View style={{ alignItems:'center', padding:30 }}>
+                <Text style={{ fontSize:30, marginBottom:8 }}>📸</Text>
+                <Text style={{ fontSize:13, color:t.text2 }}>No snapshots yet</Text>
+                <Text style={{ fontSize:12, color:t.text2, marginTop:4 }}>
+                  Snapshots are saved automatically when SOS fires
+                </Text>
+              </View>
+            : snapshots.map((s,i) => (
+              <View key={i} style={{ marginBottom:12, borderRadius:12, overflow:'hidden',
+                borderWidth:1, borderColor:t.border }}>
+                <Image
+                  source={{ uri:`${base}/snapshots/${s.file}` }}
+                  style={{ width:'100%', aspectRatio:16/9 }}
+                  resizeMode="cover"
+                />
+                <View style={{ padding:10, backgroundColor:t.bg2 }}>
+                  <Text style={{ fontSize:11, color:t.accent, fontWeight:'600' }}>{s.time}</Text>
+                  <Text style={{ fontSize:12, color:t.text, marginTop:2 }}>{s.reason}</Text>
+                </View>
+              </View>
+            ))
+          }
+        </View>
+      )}
+
+      {/* Setup instructions (when not connected) */}
+      {!connected && (
+        <View style={{ backgroundColor:alpha(t.accent,.07), borderRadius:12, padding:14,
+          borderWidth:1, borderColor:alpha(t.accent,.2) }}>
+          <Text style={{ fontSize:14, fontWeight:'700', color:t.accent, marginBottom:10 }}>
+            How to start the server on your PC:
+          </Text>
+          {[
+            'pip install opencv-python mediapipe flask flask-cors',
+            'python threat_server.py',
+            '# Auto-opens browser at http://localhost:5050',
+            '# Find your PC IP:  run  ipconfig  in cmd',
+            '# Enter that IP above and tap Connect',
+          ].map((line,i) => (
+            <View key={i} style={{ backgroundColor:t.bg, borderRadius:6, padding:8, marginBottom:6 }}>
+              <Text style={{ fontSize:11,
+                color: line.startsWith('#') ? t.text2 : t.text,
+                fontFamily:'monospace' }}>{line}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+    </ScrollView>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  NAV BAR
 // ══════════════════════════════════════════════════════════════════
@@ -549,7 +1073,8 @@ const TABS = [
   { key:'home',     label:'Home',     icon:'🏠' },
   { key:'kit',      label:'Kit',      icon:'📦' },
   { key:'sos',      label:'SOS',      icon:'🚨' },
-  { key:'plan',     label:'Plan',     icon:'🗺️' },
+  { key:'ai',       label:'AI Scout', icon:'🤖' },
+  { key:'camera',   label:'Camera',   icon:'📷' },
   { key:'settings', label:'Settings', icon:'⚙️' },
 ];
 
@@ -617,21 +1142,17 @@ export default function App() {
           <Text style={{ fontSize:20, fontWeight:'700', color:'#fff' }}>StepPrep</Text>
           <Text style={{ fontSize:11, color:'rgba(255,255,255,.7)', marginTop:1 }}>Emergency Preparedness</Text>
         </View>
-        <View style={{ flexDirection:'row', gap:6 }}>
-          {Object.entries(THEMES).map(([key,th]) => (
-            <TouchableOpacity key={key} onPress={()=>setThemeName(key)}
-              style={{ width:16, height:16, borderRadius:8, backgroundColor:th.primary,
-                borderWidth:2, borderColor:themeName===key?'#fff':'transparent' }} />
-          ))}
-        </View>
+        <Text style={{ fontSize:11, color:'rgba(255,255,255,.6)' }}>Theme in Settings ›</Text>
       </View>
 
       {/* Screen */}
-      <View style={{ flex:1 }}>
+      <View style={{ flex:1, position:'relative' }}>
         {tab==='home'     && <HomeScreen     {...screenProps} />}
         {tab==='kit'      && <KitScreen      {...screenProps} />}
         {tab==='sos'      && <SOSScreen      {...screenProps} />}
         {tab==='plan'     && <PlanScreen     {...screenProps} />}
+        {tab==='ai'       && <AIScreen       {...screenProps} />}
+        {tab==='camera'   && <CameraScreen   {...screenProps} />}
         {tab==='settings' && <SettingsScreen {...screenProps} themeName={themeName} setThemeName={setThemeName} t={t} />}
       </View>
 
