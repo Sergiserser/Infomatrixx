@@ -1,0 +1,35 @@
+{
+  "name": "StepPrep Emergency Desktop",
+  "source": "StepPrep Figma design import",
+  "font_family": "Segoe UI",
+  "colors": {
+    "app_bg": "#0a0e17",
+    "panel_bg": "#111827",
+    "status_bg": "#0a0e17",
+    "input_bg": "#000000",
+    "button_bg": "#1f2937",
+    "button_selected": "#dc2626",
+    "button_hover": "#374151",
+    "button_selected_hover": "#ef4444",
+    "primary": "#06b6d4",
+    "border": "#1f2937",
+    "danger": "#dc2626",
+    "danger_hover": "#ef4444",
+    "success": "#16a34a",
+    "success_hover": "#22c55e",
+    "warning": "#f59e0b",
+    "video_bg": "#000000",
+    "text": "#f9fafb",
+    "text_strong": "#ffffff",
+    "text_label": "#d1d5db",
+    "text_muted": "#9ca3af",
+    "button_text": "#ffffff",
+    "caret": "#ffffff"
+  },
+  "font_sizes": {
+    "body": 12,
+    "button": 12,
+    "label": 12,
+    "heading": 14
+  }
+}

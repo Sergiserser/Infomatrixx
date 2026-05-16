@@ -1,5 +1,5 @@
 """
-KivyMD mobile extension for Emergency Rescue Assistant.
+KivyMD mobile extension for StepPrep.
 
 Run on desktop for UI testing:
     python mobile_rescue_app.py
@@ -744,6 +744,7 @@ class RescueMobileApp(MDApp):
         self.theme_cls.theme_style = "Light"
         self.rescue_config = MobileConfig()
         self.i18n = get_translator(self.rescue_config.app_language)
+        self.title = self.i18n.t("app_title")
         self.shelters = ShelterManager(self.rescue_config, self.i18n)
         self.account_label = load_google_account_label(self.i18n)
         request_android_permissions()
@@ -833,6 +834,7 @@ class RescueMobileApp(MDApp):
 
     def toggle_language(self) -> None:
         self.i18n.toggle()
+        self.title = self.i18n.t("app_title")
         self.shelters.i18n = self.i18n
         self.account_label = load_google_account_label(self.i18n)
         self.refresh_all()

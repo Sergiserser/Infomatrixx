@@ -1,7 +1,7 @@
 [app]
 
-title = Rescue Assistant
-package.name = rescueassistant
+title = StepPrep
+package.name = stepprep
 package.domain = org.osana
 
 source.dir = .

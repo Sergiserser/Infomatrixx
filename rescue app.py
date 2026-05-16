@@ -1,5 +1,5 @@
 ﻿"""
-Emergency Rescue Assistant
+StepPrep
 
 Prototype for detecting dangerous events from microphone + camera input.
 
@@ -46,11 +46,14 @@ import hashlib
 import html
 import json
 import math
+import mimetypes
 import os
 import queue
+import re
 import time
 import threading
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -223,9 +226,12 @@ class RescueConfig:
     # Local HTTP server for camera view / Локальний HTTP-сервер для перегляду камери
     server_enabled: bool = os.getenv("RESCUE_SERVER_ENABLED", "0") == "1"
     server_port: int = int(os.getenv("RESCUE_SERVER_PORT", "8080"))
+    api_host: str = os.getenv("RESCUE_API_HOST", "127.0.0.1")
+    api_port: int = int(os.getenv("RESCUE_API_PORT", os.getenv("RESCUE_SERVER_PORT", "8080")))
+    api_frontend_dir: str = os.getenv("RESCUE_FRONTEND_DIR", str(APP_DIR / "figma design" / "dist"))
 
-    # App mode: 'full' runs the desktop UI; 'demo' runs a browser-accessible demo server only
-    mode: str = os.getenv("RESCUE_MODE", "full")
+    # App mode: 'api' exposes REST endpoints for the Figma/React UI; 'full' keeps the legacy Tk UI.
+    mode: str = os.getenv("RESCUE_MODE", "api")
     # Moving object / weapon detection
     object_detection_enabled: bool = os.getenv("OBJECT_DETECTION_ENABLED", "1") == "1"
     object_min_area: float = float(os.getenv("OBJECT_MIN_AREA", "30"))
@@ -248,6 +254,279 @@ class RescueConfig:
     )
     google_oauth_timeout_seconds: float = float(os.getenv("GOOGLE_OAUTH_TIMEOUT_SECONDS", "120"))
     supplies_file: str = os.getenv("SUPPLIES_FILE", str(APP_DIR / "supplies.json"))
+    _design_theme_source: str = os.getenv("DESIGN_THEME_FILE", str(APP_DIR / "figma_theme.json"))
+    design_theme_file: str = str(Path(_design_theme_source) / "figma_theme.json") if Path(_design_theme_source).is_dir() else _design_theme_source
+
+
+class UIDesignTheme:
+    """Loads desktop UI colors/fonts from a Figma token-style JSON file."""
+
+    DEFAULT: dict[str, Any] = {
+        "font_family": "Segoe UI",
+        "colors": {
+            "app_bg": "#0d1219",
+            "panel_bg": "#0f1720",
+            "status_bg": "#111923",
+            "input_bg": "#15202b",
+            "button_bg": "#263545",
+            "button_selected": "#0587f2",
+            "button_hover": "#36506a",
+            "button_selected_hover": "#0aa4ff",
+            "primary": "#06b6d4",
+            "border": "#1f2937",
+            "danger": "#dc2626",
+            "danger_hover": "#ef4444",
+            "success": "#16a34a",
+            "success_hover": "#22c55e",
+            "warning": "#f59e0b",
+            "video_bg": "#000000",
+            "text": "#d9e8f4",
+            "text_strong": "#eef6ff",
+            "text_label": "#e7f4ff",
+            "text_muted": "#c7d7e5",
+            "button_text": "#ffffff",
+            "caret": "#ffffff",
+        },
+        "font_sizes": {
+            "body": 12,
+            "button": 12,
+            "label": 12,
+            "heading": 13,
+        },
+    }
+
+    COLOR_ALIASES = {
+        "background": "app_bg",
+        "bg": "app_bg",
+        "app_background": "app_bg",
+        "surface": "panel_bg",
+        "panel": "panel_bg",
+        "surface_bg": "panel_bg",
+        "status": "status_bg",
+        "input": "input_bg",
+        "accent": "primary",
+        "brand": "primary",
+        "selected": "button_selected",
+        "text_primary": "text",
+        "primary_text": "text",
+        "text_secondary": "text_muted",
+        "secondary_text": "text_muted",
+        "on_primary": "button_text",
+    }
+
+    def __init__(self, data: Optional[dict[str, Any]] = None, source: str = "") -> None:
+        self.source = source
+        self.load_error = ""
+        self.data = json.loads(json.dumps(self.DEFAULT))
+        self._deep_update(self.data, self._normalise(data or {}))
+
+    @classmethod
+    def from_file(cls, path: str) -> "UIDesignTheme":
+        theme_path = Path(path)
+        if theme_path.is_dir():
+            candidate = cls._find_theme_file_in_directory(theme_path)
+            if candidate is None:
+                theme = cls(source=str(theme_path))
+                theme.load_error = f"No theme JSON or ZIP found in directory: {theme_path}"
+                return theme
+            theme_path = candidate
+
+        if not theme_path.exists():
+            fallback = APP_DIR / "figma_theme.json"
+            if fallback.exists():
+                theme_path = fallback
+            else:
+                return cls(source=str(theme_path))
+
+        if theme_path.suffix.lower() == ".zip":
+            return cls.from_zip(theme_path)
+        try:
+            data = json.loads(theme_path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                raise ValueError("theme JSON root must be an object")
+            return cls(data, source=str(theme_path))
+        except Exception as error:
+            theme = cls(source=str(theme_path))
+            theme.load_error = str(error)
+            return theme
+
+    @classmethod
+    def _find_theme_file_in_directory(cls, directory: Path) -> Optional[Path]:
+        candidates = [
+            directory / "figma_theme.json",
+            directory / "theme.json",
+            directory / "design_theme.json",
+        ]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+        for pattern in ("*.json", "*.zip"):
+            for entry in sorted(directory.glob(pattern)):
+                if entry.is_file():
+                    return entry
+        return None
+
+    @classmethod
+    def from_zip(cls, path: Path) -> "UIDesignTheme":
+        try:
+            with zipfile.ZipFile(path) as archive:
+                source_parts: list[str] = []
+                for entry in archive.namelist():
+                    if entry.endswith(("StepPrepDesktop.tsx", "SafeReadyComponents.tsx", "theme.css")):
+                        with archive.open(entry) as handle:
+                            source_parts.append(handle.read().decode("utf-8", "ignore"))
+            data = cls._theme_from_export_text("\n".join(source_parts))
+            data["source"] = str(path)
+            return cls(data, source=str(path))
+        except Exception as error:
+            theme = cls(source=str(path))
+            theme.load_error = str(error)
+            return theme
+
+    @classmethod
+    def _theme_from_export_text(cls, text: str) -> dict[str, Any]:
+        hex_colors = {match.lower() for match in re.findall(r"#[0-9a-fA-F]{6}", text)}
+
+        def pick(*candidates: str, fallback: str) -> str:
+            for candidate in candidates:
+                if candidate.lower() in hex_colors:
+                    return candidate
+            return fallback
+
+        return {
+            "font_family": "Segoe UI",
+            "colors": {
+                "app_bg": pick("#0a0e17", "#ffffff", fallback=cls.DEFAULT["colors"]["app_bg"]),
+                "panel_bg": pick("#111827", "#ffffff", fallback=cls.DEFAULT["colors"]["panel_bg"]),
+                "status_bg": pick("#0a0e17", "#111923", fallback=cls.DEFAULT["colors"]["status_bg"]),
+                "input_bg": pick("#000000", "#f3f3f5", fallback=cls.DEFAULT["colors"]["input_bg"]),
+                "button_bg": pick("#1f2937", "#030213", fallback=cls.DEFAULT["colors"]["button_bg"]),
+                "button_selected": pick("#dc2626", "#030213", fallback=cls.DEFAULT["colors"]["button_selected"]),
+                "button_hover": pick("#374151", "#e9ebef", fallback=cls.DEFAULT["colors"]["button_hover"]),
+                "button_selected_hover": pick("#ef4444", "#dc2626", fallback=cls.DEFAULT["colors"]["button_selected_hover"]),
+                "primary": pick("#06b6d4", fallback=cls.DEFAULT["colors"]["primary"]),
+                "border": pick("#1f2937", "#e5e7eb", fallback=cls.DEFAULT["colors"]["border"]),
+                "danger": pick("#dc2626", "#ef4444", fallback=cls.DEFAULT["colors"]["danger"]),
+                "danger_hover": pick("#ef4444", "#dc2626", fallback=cls.DEFAULT["colors"]["danger_hover"]),
+                "success": pick("#16a34a", "#10b981", fallback=cls.DEFAULT["colors"]["success"]),
+                "success_hover": pick("#22c55e", "#16a34a", fallback=cls.DEFAULT["colors"]["success_hover"]),
+                "warning": pick("#f59e0b", fallback=cls.DEFAULT["colors"]["warning"]),
+                "video_bg": "#000000",
+                "text": pick("#f9fafb", "#111827", fallback=cls.DEFAULT["colors"]["text"]),
+                "text_strong": "#ffffff",
+                "text_label": pick("#d1d5db", "#e5e7eb", fallback=cls.DEFAULT["colors"]["text_label"]),
+                "text_muted": pick("#9ca3af", "#6b7280", fallback=cls.DEFAULT["colors"]["text_muted"]),
+                "button_text": "#ffffff",
+                "caret": "#ffffff",
+            },
+            "font_sizes": {
+                "body": 12,
+                "button": 12,
+                "label": 12,
+                "heading": 14,
+            },
+        }
+
+    def color(self, key: str) -> str:
+        colors = self.data.get("colors", {})
+        defaults = self.DEFAULT["colors"]
+        value = colors.get(key, defaults.get(key, "#ffffff")) if isinstance(colors, dict) else defaults.get(key, "#ffffff")
+        return str(value)
+
+    def font(self, role: str = "body", bold: bool = False) -> tuple[Any, ...]:
+        family = str(self.data.get("font_family", self.DEFAULT["font_family"]))
+        sizes = self.data.get("font_sizes", {})
+        default_sizes = self.DEFAULT["font_sizes"]
+        raw_size = sizes.get(role, default_sizes.get(role, default_sizes["body"])) if isinstance(sizes, dict) else default_sizes["body"]
+        size = self._coerce_int(raw_size, int(default_sizes["body"]))
+        if bold:
+            return (family, size, "bold")
+        return (family, size)
+
+    @classmethod
+    def _normalise(cls, data: dict[str, Any]) -> dict[str, Any]:
+        normalised = dict(data)
+        if "fontFamily" in normalised and "font_family" not in normalised:
+            normalised["font_family"] = cls._token_value(normalised["fontFamily"])
+        if "fontSizes" in normalised and "font_sizes" not in normalised:
+            normalised["font_sizes"] = normalised["fontSizes"]
+
+        colors = normalised.get("colors") or normalised.get("color") or normalised.get("palette")
+        if isinstance(colors, dict):
+            flat_colors = cls._flatten_tokens(colors)
+            normalised["colors"] = {
+                cls.COLOR_ALIASES.get(key, key): value
+                for key, value in flat_colors.items()
+                if isinstance(value, str) and value
+            }
+
+        for group_name in ("font_sizes", "spacing", "radii"):
+            group = normalised.get(group_name)
+            if isinstance(group, dict):
+                normalised[group_name] = {
+                    key: cls._token_value(value)
+                    for key, value in cls._flatten_tokens(group).items()
+                }
+        return normalised
+
+    @classmethod
+    def _flatten_tokens(cls, data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+        flat: dict[str, Any] = {}
+        for raw_key, raw_value in data.items():
+            key = cls._normalise_key(str(raw_key))
+            full_key = f"{prefix}_{key}" if prefix else key
+            value = cls._token_value(raw_value)
+            if isinstance(value, dict):
+                flat.update(cls._flatten_tokens(value, full_key))
+            else:
+                flat[full_key] = value
+                if not prefix:
+                    flat[key] = value
+        return flat
+
+    @staticmethod
+    def _normalise_key(key: str) -> str:
+        result = []
+        previous_was_separator = False
+        for character in key.strip():
+            if character.isalnum():
+                if character.isupper() and result and not previous_was_separator:
+                    result.append("_")
+                result.append(character.lower())
+                previous_was_separator = False
+            else:
+                if result and not previous_was_separator:
+                    result.append("_")
+                previous_was_separator = True
+        return "".join(result).strip("_")
+
+    @classmethod
+    def _token_value(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "value" in value:
+            return cls._token_value(value.get("value"))
+        return value
+
+    @classmethod
+    def _deep_update(cls, base: dict[str, Any], updates: dict[str, Any]) -> None:
+        for key, value in updates.items():
+            clean_value = cls._token_value(value)
+            if isinstance(base.get(key), dict) and isinstance(clean_value, dict):
+                cls._deep_update(base[key], clean_value)
+            elif clean_value not in (None, ""):
+                base[key] = clean_value
+
+    @staticmethod
+    def _coerce_int(value: Any, fallback: int) -> int:
+        if isinstance(value, (int, float)):
+            return max(8, int(value))
+        if isinstance(value, str):
+            numeric = "".join(character for character in value if character.isdigit() or character == ".")
+            try:
+                return max(8, int(float(numeric)))
+            except ValueError:
+                return fallback
+        return fallback
 
 
 # One detected audio warning / Одне знайдене аудіопопередження
@@ -2014,7 +2293,7 @@ class ShelterManager:
         ]
         for url in urls:
             try:
-                request = urllib.request.Request(url, headers={"User-Agent": "RescueAssistant/1.0"})
+                request = urllib.request.Request(url, headers={"User-Agent": "StepPrep/1.0"})
                 with urllib.request.urlopen(request, timeout=8) as response:
                     data = json.loads(response.read().decode("utf-8"))
                 lat = parse_optional_float(str(data.get("latitude", data.get("lat", ""))))
@@ -2061,7 +2340,7 @@ out center tags 30;
                 method="POST",
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "RescueAssistant/1.0",
+                    "User-Agent": "StepPrep/1.0",
                 },
             )
             with urllib.request.urlopen(request, timeout=18) as response:
@@ -3072,6 +3351,9 @@ class TkRescueUI:
         self.shelter_manager = shelter_manager
         self.supplies_manager = supplies_manager
         self.account_manager = account_manager
+        self.theme = UIDesignTheme.from_file(config.design_theme_file)
+        if self.theme.load_error:
+            print(f"Design theme load failed: {self.theme.load_error}")
         self.current_tab = "monitor"
         self.saved_current_alarm = False
         self.opened_map_for_current_alarm = False
@@ -3084,10 +3366,13 @@ class TkRescueUI:
         self._supplies_editor_updating = False
         self._visible_form: Optional[str] = None
         self._video_visible = True
+        self._stats_visible = True
 
         self.root = tk.Tk()
         self.root.title(self.i18n.t("app_title"))
-        self.root.configure(bg="#0d1219")
+        self.root.configure(bg=self.theme.color("app_bg"))
+        self.root.geometry("1180x860")
+        self.root.minsize(980, 720)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<Key>", self._on_key)
         self._build_layout()
@@ -3107,41 +3392,131 @@ class TkRescueUI:
 
     def _build_layout(self) -> None:
         # Tkinter renders Ukrainian text reliably / Tkinter надійно показує український текст
-        self.nav_frame = tk.Frame(self.root, bg="#0d1219")
-        self.nav_frame.pack(fill="x", padx=12, pady=(10, 6))
+        color = self.theme.color
+        font = self.theme.font
+
+        self.header_frame = tk.Frame(
+            self.root,
+            bg=color("panel_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
+            padx=18,
+            pady=12,
+        )
+        self.header_frame.pack(fill="x")
+        self.header_frame.grid_columnconfigure(1, weight=1)
+
+        self.header_mark = tk.Label(
+            self.header_frame,
+            text="STEP",
+            bg=color("danger"),
+            fg=color("button_text"),
+            font=font("button", bold=True),
+            padx=12,
+            pady=8,
+            highlightbackground=color("border"),
+            highlightthickness=2,
+        )
+        self.header_mark.grid(row=0, column=0, rowspan=2, sticky="w", padx=(0, 12))
+        self.header_title_label = tk.Label(
+            self.header_frame,
+            text=self.i18n.t("desktop_system_title"),
+            bg=color("panel_bg"),
+            fg=color("text_strong"),
+            font=font("heading", bold=True),
+            anchor="w",
+        )
+        self.header_title_label.grid(row=0, column=1, sticky="ew")
+        self.header_subtitle_label = tk.Label(
+            self.header_frame,
+            text=self.i18n.t("desktop_platform_subtitle"),
+            bg=color("panel_bg"),
+            fg=color("text_muted"),
+            font=font("label", bold=True),
+            anchor="w",
+        )
+        self.header_subtitle_label.grid(row=1, column=1, sticky="ew")
+
+        self.header_status_frame = tk.Frame(self.header_frame, bg=color("panel_bg"))
+        self.header_status_frame.grid(row=0, column=2, rowspan=2, sticky="e")
+        self.header_mode_label = tk.Label(
+            self.header_status_frame,
+            bg=color("button_bg"),
+            fg=color("warning"),
+            font=font("label", bold=True),
+            padx=12,
+            pady=7,
+            highlightbackground=color("warning"),
+            highlightthickness=2,
+        )
+        self.header_mode_label.pack(side="left", padx=4)
+        self.header_contact_label = tk.Label(
+            self.header_status_frame,
+            bg=color("button_bg"),
+            fg=color("danger_hover"),
+            font=font("label", bold=True),
+            padx=12,
+            pady=7,
+            highlightbackground=color("danger"),
+            highlightthickness=2,
+        )
+        self.header_contact_label.pack(side="left", padx=4)
+        self.header_language_button = tk.Button(
+            self.header_status_frame,
+            command=lambda: self._handle_action("toggle_language"),
+            relief="flat",
+            bd=0,
+            bg=color("button_bg"),
+            fg=color("button_text"),
+            activebackground=color("button_hover"),
+            activeforeground=color("button_text"),
+            font=font("label", bold=True),
+            padx=12,
+            pady=7,
+        )
+        self.header_language_button.pack(side="left", padx=4)
+
+        self.main_container = tk.Frame(self.root, bg=color("app_bg"))
+        self.main_container.pack(fill="both", expand=True, padx=16, pady=14)
+
+        self.nav_frame = tk.Frame(
+            self.main_container,
+            bg=color("panel_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
+            padx=4,
+            pady=4,
+        )
+        self.nav_frame.pack(fill="x", pady=(0, 12))
 
         # Quick access framed buttons that open separate windows
-        self.quick_frames = tk.Frame(self.root, bg="#0d1219")
-        self.quick_frames.pack(fill="x", padx=12, pady=(4, 6))
+        self.quick_frames = tk.Frame(self.main_container, bg=color("app_bg"))
+        self.quick_frames.pack(fill="x", pady=(0, 12))
         self.quick_access_frames: dict[str, Any] = {}
         self.quick_access_buttons: dict[str, Any] = {}
         quick_access_items = (
-            ("shelter", "shelter_tab", "shelter_tab"),
-            ("supplies", "supplies_tab", "supplies_short"),
-            ("settings", "settings_tab", "settings_short"),
+            ("shelter", "shelter_tab"),
+            ("supplies", "supplies_tab"),
+            ("settings", "settings_tab"),
         )
-        for window_id, frame_key, button_key in quick_access_items:
-            frame = tk.LabelFrame(
-                self.quick_frames,
-                text=self.i18n.t(frame_key),
-                bg="#0f1720",
-                fg="#d9e8f4",
-                font=("Segoe UI", 12, "bold"),
-            )
-            frame.pack(side="left", padx=6, pady=2, fill="y")
+        for window_id, button_key in quick_access_items:
             button = tk.Button(
-                frame,
+                self.quick_frames,
                 text=self.i18n.t(button_key),
                 command=lambda selected=window_id: self._toggle_popup(selected),
-                bg="#1e6fd8",
-                fg="#ffffff",
+                bg=color("button_bg"),
+                fg=color("button_text"),
+                activebackground=color("button_hover"),
+                activeforeground=color("button_text"),
                 relief="flat",
-                font=("Segoe UI", 12, "bold"),
-                padx=12,
+                bd=0,
+                font=font("button", bold=True),
+                padx=14,
                 pady=8,
+                highlightbackground=color("border"),
+                highlightthickness=2,
             )
-            button.pack(padx=6, pady=6)
-            self.quick_access_frames[window_id] = frame
+            button.pack(side="left", padx=(0, 8))
             self.quick_access_buttons[window_id] = button
 
         self.tab_buttons: dict[str, Any] = {}
@@ -3149,33 +3524,108 @@ class TkRescueUI:
             button = tk.Button(
                 self.nav_frame,
                 command=lambda selected=tab_id: self._set_tab(selected),
+                bg=color("button_bg"),
+                fg=color("button_text"),
+                activebackground=color("button_hover"),
+                activeforeground=color("button_text"),
+                highlightbackground=color("border"),
+                highlightthickness=2,
                 relief="flat",
+                bd=0,
                 padx=14,
-                pady=7,
-                font=("Segoe UI", 12, "bold"),
+                pady=11,
+                font=font("button", bold=True),
             )
-            button.pack(side="left", padx=4)
+            button.pack(side="left", fill="x", expand=True, padx=2)
             self.tab_buttons[tab_id] = button
 
-        self.video_label = tk.Label(self.root, bg="#000000")
-        self.video_label.pack(fill="both", expand=True, padx=12, pady=4)
+        self.main_panel = tk.Frame(
+            self.main_container,
+            bg=color("panel_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
+            padx=14,
+            pady=14,
+        )
+        self.main_panel.pack(fill="both", expand=True)
+
+        self.stats_frame = tk.Frame(self.main_panel, bg=color("panel_bg"))
+        self.stats_frame.pack(fill="x", pady=(0, 10))
+        self.stat_title_labels: dict[str, Any] = {}
+        self.stat_value_labels: dict[str, Any] = {}
+        self.stat_detail_labels: dict[str, Any] = {}
+        stat_items = (
+            ("risk", "risk"),
+            ("alarm", "alarm"),
+            ("camera", "camera"),
+            ("systems", "detection_systems"),
+        )
+        for index, (stat_id, label_key) in enumerate(stat_items):
+            card = tk.Frame(
+                self.stats_frame,
+                bg=color("app_bg"),
+                highlightbackground=color("border"),
+                highlightthickness=2,
+                padx=14,
+                pady=10,
+            )
+            card.grid(row=0, column=index, sticky="nsew", padx=(0, 10 if index < len(stat_items) - 1 else 0))
+            self.stats_frame.grid_columnconfigure(index, weight=1, uniform="stats")
+            title = tk.Label(
+                card,
+                text=self.i18n.t(label_key).upper(),
+                bg=color("app_bg"),
+                fg=color("text_muted"),
+                font=font("label", bold=True),
+                anchor="w",
+            )
+            title.pack(fill="x")
+            value = tk.Label(
+                card,
+                bg=color("app_bg"),
+                fg=color("text_strong"),
+                font=(str(self.theme.data.get("font_family", "Segoe UI")), 20, "bold"),
+                anchor="w",
+            )
+            value.pack(fill="x", pady=(6, 0))
+            detail = tk.Label(
+                card,
+                bg=color("app_bg"),
+                fg=color("text_muted"),
+                font=font("label", bold=True),
+                anchor="w",
+            )
+            detail.pack(fill="x", pady=(2, 0))
+            self.stat_title_labels[stat_id] = title
+            self.stat_value_labels[stat_id] = value
+            self.stat_detail_labels[stat_id] = detail
+
+        self.video_label = tk.Label(
+            self.main_panel,
+            bg=color("video_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
+        )
+        self.video_label.pack(fill="both", expand=True, pady=(0, 10))
 
         self.status_label = tk.Label(
-            self.root,
-            bg="#111923",
-            fg="#eef6ff",
+            self.main_panel,
+            bg=color("app_bg"),
+            fg=color("text_strong"),
             justify="left",
             anchor="w",
             padx=12,
             pady=8,
-            font=("Segoe UI", 12),
+            font=font("body"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
         )
-        self.status_label.pack(fill="x", padx=12, pady=(4, 6))
+        self.status_label.pack(fill="x", pady=(0, 10))
 
-        self.action_frame_top = tk.Frame(self.root, bg="#0d1219")
-        self.action_frame_top.pack(fill="x", padx=12, pady=(0, 4))
-        self.action_frame_bottom = tk.Frame(self.root, bg="#0d1219")
-        self.action_frame_bottom.pack(fill="x", padx=12, pady=(0, 6))
+        self.action_frame_top = tk.Frame(self.main_panel, bg=color("panel_bg"))
+        self.action_frame_top.pack(fill="x", pady=(0, 4))
+        self.action_frame_bottom = tk.Frame(self.main_panel, bg=color("panel_bg"))
+        self.action_frame_bottom.pack(fill="x", pady=(0, 10))
 
         self.action_buttons: dict[str, Any] = {}
         top_actions = ("cancel", "confirm", "auto_shelters", "google_search", "map")
@@ -3186,9 +3636,15 @@ class TkRescueUI:
                 command=lambda selected=action: self._handle_action(selected),
                 relief="flat",
                 bd=0,
+                bg=color("button_bg"),
+                fg=color("button_text"),
+                activebackground=color("button_hover"),
+                activeforeground=color("button_text"),
+                highlightbackground=color("border"),
+                highlightthickness=2,
                 width=20,
                 height=2,
-                font=("Segoe UI", 12, "bold"),
+                font=font("button", bold=True),
             )
             button.grid(row=0, column=index, sticky="ew", padx=5, pady=4)
             self.action_frame_top.grid_columnconfigure(index, weight=1)
@@ -3200,28 +3656,39 @@ class TkRescueUI:
                 command=lambda selected=action: self._handle_action(selected),
                 relief="flat",
                 bd=0,
+                bg=color("button_bg"),
+                fg=color("button_text"),
+                activebackground=color("button_hover"),
+                activeforeground=color("button_text"),
+                highlightbackground=color("border"),
+                highlightthickness=2,
                 width=20,
                 height=2,
-                font=("Segoe UI", 12, "bold"),
+                font=font("button", bold=True),
             )
             button.grid(row=0, column=index, sticky="ew", padx=5, pady=4)
             self.action_frame_bottom.grid_columnconfigure(index, weight=1)
             self.action_buttons[action] = button
 
-        self.shelter_form_frame = tk.LabelFrame(
-            self.root,
-            text=self.i18n.t("manual_shelter_header"),
-            bg="#0f1720",
-            fg="#d9e8f4",
-            font=("Segoe UI", 13, "bold"),
-            bd=1,
-            relief="solid",
-            labelanchor="nw",
+        self.shelter_form_frame = tk.Frame(
+            self.main_panel,
+            bg=color("panel_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
             padx=10,
             pady=10,
         )
-        self.shelter_form_frame.pack(fill="x", padx=12, pady=(0, 6))
+        self.shelter_form_frame.pack(fill="x", pady=(0, 10))
         self._visible_form = "shelter"
+        self.shelter_form_title = tk.Label(
+            self.shelter_form_frame,
+            text=self.i18n.t("manual_shelter_header").upper(),
+            bg=color("panel_bg"),
+            fg=color("text_strong"),
+            font=font("heading", bold=True),
+            anchor="w",
+        )
+        self.shelter_form_title.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
         self._last_search_query_default = self.shelter_manager.default_query()
         self.search_query_var = tk.StringVar(value=self._last_search_query_default)
@@ -3242,31 +3709,31 @@ class TkRescueUI:
             ("note_label", self.shelter_note_var),
         ]
         self.shelter_form_labels: dict[str, Any] = {}
-        for row, (label_key, variable) in enumerate(form_labels):
+        for row, (label_key, variable) in enumerate(form_labels, start=1):
             label = tk.Label(
                 self.shelter_form_frame,
                 text=self.i18n.t(label_key),
-                bg="#0f1720",
-                fg="#e7f4ff",
-                font=("Segoe UI", 12, "bold"),
+                bg=color("panel_bg"),
+                fg=color("text_label"),
+                font=font("label", bold=True),
             )
             label.grid(row=row, column=0, sticky="w", padx=(0, 6), pady=4)
             self.shelter_form_labels[label_key] = label
             entry = tk.Entry(
                 self.shelter_form_frame,
                 textvariable=variable,
-                font=("Segoe UI", 12),
-                bg="#15202b",
-                fg="#eef6ff",
-                insertbackground="#ffffff",
+                font=font("body"),
+                bg=color("input_bg"),
+                fg=color("text_strong"),
+                insertbackground=color("caret"),
                 relief="flat",
                 width=46,
             )
             entry.grid(row=row, column=1, sticky="ew", pady=4)
             self.shelter_form_frame.grid_columnconfigure(1, weight=1)
 
-        self.shelter_buttons_frame = tk.Frame(self.shelter_form_frame, bg="#0f1720")
-        self.shelter_buttons_frame.grid(row=len(form_labels), column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.shelter_buttons_frame = tk.Frame(self.shelter_form_frame, bg=color("panel_bg"))
+        self.shelter_buttons_frame.grid(row=len(form_labels) + 1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         self.shelter_buttons_frame.grid_columnconfigure(0, weight=1)
         self.shelter_buttons_frame.grid_columnconfigure(1, weight=1)
 
@@ -3276,9 +3743,11 @@ class TkRescueUI:
             command=lambda: self._handle_action("google_search"),
             relief="flat",
             bd=0,
-            bg="#1e6fd8",
-            fg="#ffffff",
-            font=("Segoe UI", 12, "bold"),
+            bg=color("primary"),
+            fg=color("button_text"),
+            activebackground=color("button_selected_hover"),
+            activeforeground=color("button_text"),
+            font=font("button", bold=True),
             height=2,
         )
         self.search_query_button.grid(row=0, column=0, sticky="ew", padx=5)
@@ -3289,31 +3758,38 @@ class TkRescueUI:
             command=lambda: self._handle_action("add_shelter"),
             relief="flat",
             bd=0,
-            bg="#1e6fd8",
-            fg="#ffffff",
-            font=("Segoe UI", 12, "bold"),
+            bg=color("primary"),
+            fg=color("button_text"),
+            activebackground=color("button_selected_hover"),
+            activeforeground=color("button_text"),
+            font=font("button", bold=True),
             height=2,
         )
         self.add_shelter_button.grid(row=0, column=1, sticky="ew", padx=5)
 
-        self.supplies_editor_frame = tk.LabelFrame(
-            self.root,
-            text=self.i18n.t("supplies_custom_header"),
-            bg="#0f1720",
-            fg="#d9e8f4",
-            font=("Segoe UI", 13, "bold"),
-            bd=1,
-            relief="solid",
-            labelanchor="nw",
+        self.supplies_editor_frame = tk.Frame(
+            self.main_panel,
+            bg=color("panel_bg"),
+            highlightbackground=color("border"),
+            highlightthickness=2,
             padx=10,
             pady=10,
         )
+        self.supplies_editor_title = tk.Label(
+            self.supplies_editor_frame,
+            text=self.i18n.t("supplies_custom_header").upper(),
+            bg=color("panel_bg"),
+            fg=color("text_strong"),
+            font=font("heading", bold=True),
+            anchor="w",
+        )
+        self.supplies_editor_title.pack(fill="x", pady=(0, 6))
         self.supplies_editor_hint = tk.Label(
             self.supplies_editor_frame,
             text=self.i18n.t("supplies_editor_hint"),
-            bg="#0f1720",
-            fg="#c7d7e5",
-            font=("Segoe UI", 12),
+            bg=color("panel_bg"),
+            fg=color("text_muted"),
+            font=font("body"),
             anchor="w",
         )
         self.supplies_editor_hint.pack(fill="x", pady=(0, 6))
@@ -3321,10 +3797,10 @@ class TkRescueUI:
             self.supplies_editor_frame,
             height=6,
             wrap="word",
-            font=("Segoe UI", 12),
-            bg="#15202b",
-            fg="#eef6ff",
-            insertbackground="#ffffff",
+            font=font("body"),
+            bg=color("input_bg"),
+            fg=color("text_strong"),
+            insertbackground=color("caret"),
             relief="flat",
             padx=8,
             pady=7,
@@ -3332,7 +3808,7 @@ class TkRescueUI:
         self.supplies_editor_text.pack(fill="x")
         self.supplies_editor_text.bind("<KeyRelease>", self._on_supplies_editor_change)
         self.supplies_editor_text.bind("<FocusOut>", self._on_supplies_editor_change)
-        self.supplies_buttons_frame = tk.Frame(self.supplies_editor_frame, bg="#0f1720")
+        self.supplies_buttons_frame = tk.Frame(self.supplies_editor_frame, bg=color("panel_bg"))
         self.supplies_buttons_frame.pack(fill="x", pady=(8, 0))
         self.supplies_buttons_frame.grid_columnconfigure(0, weight=1)
         self.supplies_buttons_frame.grid_columnconfigure(1, weight=1)
@@ -3342,9 +3818,11 @@ class TkRescueUI:
             command=self._save_supplies,
             relief="flat",
             bd=0,
-            bg="#1e6fd8",
-            fg="#ffffff",
-            font=("Segoe UI", 12, "bold"),
+            bg=color("primary"),
+            fg=color("button_text"),
+            activebackground=color("button_selected_hover"),
+            activeforeground=color("button_text"),
+            font=font("button", bold=True),
             height=2,
         )
         self.supplies_save_button.grid(row=0, column=0, sticky="ew", padx=5)
@@ -3354,27 +3832,32 @@ class TkRescueUI:
             command=self._reset_supplies,
             relief="flat",
             bd=0,
-            bg="#263545",
-            fg="#ffffff",
-            font=("Segoe UI", 12, "bold"),
+            bg=color("button_bg"),
+            fg=color("button_text"),
+            activebackground=color("button_hover"),
+            activeforeground=color("button_text"),
+            font=font("button", bold=True),
             height=2,
         )
         self.supplies_reset_button.grid(row=0, column=1, sticky="ew", padx=5)
 
         self.content_label = tk.Label(
-            self.root,
-            bg="#0f1720",
-            fg="#d9e8f4",
+            self.main_panel,
+            bg=color("app_bg"),
+            fg=color("text"),
             justify="left",
             anchor="nw",
             padx=12,
             pady=10,
-            font=("Segoe UI", 12),
+            font=font("body"),
             wraplength=1050,
+            highlightbackground=color("border"),
+            highlightthickness=2,
         )
-        self.content_label.pack(fill="x", padx=12, pady=(0, 10))
+        self.content_label.pack(fill="x")
         self._refresh_supplies_editor_text()
         self._refresh_static_text()
+        self._update_stat_cards(0.0)
 
     def _tick(self) -> None:
         if not self.running:
@@ -3483,6 +3966,7 @@ class TkRescueUI:
             lines.append(self.i18n.t("alarm_action_line", seconds=self.alarm.remaining_seconds))
         if self.message:
             lines.append(self.message)
+        self._update_stat_cards(risk)
         self.status_label.config(text="\n".join(lines))
         self.content_label.config(text=self._tab_content())
         # Update any open popup windows' contents
@@ -3491,6 +3975,43 @@ class TkRescueUI:
                 self._update_popup_content(win_id)
             except Exception:
                 continue
+
+    def _update_stat_cards(self, risk: float) -> None:
+        if not hasattr(self, "stat_value_labels"):
+            return
+        color = self.theme.color
+        risk_elevated = risk > 50
+        alarm_active = bool(getattr(self.alarm, "active", False))
+        remaining_seconds = float(getattr(self.alarm, "remaining_seconds", 0.0))
+        stat_updates = {
+            "risk": (
+                f"{risk:.0f}%",
+                self.i18n.t("risk_elevated") if risk_elevated else self.i18n.t("risk_normal"),
+                color("danger_hover") if risk_elevated else color("success_hover"),
+            ),
+            "alarm": (
+                self.i18n.t("active") if alarm_active else self.i18n.t("ready").upper(),
+                f"{remaining_seconds:04.1f}s" if alarm_active else self.i18n.t("monitoring").upper(),
+                color("danger_hover") if alarm_active else color("text_muted"),
+            ),
+            "camera": (
+                self.i18n.t("camera_online"),
+                self.i18n.t("live_camera_feed").upper(),
+                color("success_hover"),
+            ),
+            "systems": (
+                "CAM / MIC / GEST",
+                self.i18n.t("detection_systems").upper(),
+                color("primary"),
+            ),
+        }
+        for stat_id, (value, detail, value_color) in stat_updates.items():
+            value_label = self.stat_value_labels.get(stat_id)
+            detail_label = self.stat_detail_labels.get(stat_id)
+            if value_label is not None:
+                value_label.config(text=value, fg=value_color)
+            if detail_label is not None:
+                detail_label.config(text=detail, fg=color("text_muted"))
 
     def _tab_content(self) -> str:
         if self.current_tab == "shelter":
@@ -3539,20 +4060,40 @@ class TkRescueUI:
         )
 
     def _refresh_static_text(self) -> None:
+        color = self.theme.color
+        if hasattr(self, "header_title_label"):
+            self.header_title_label.config(text=self.i18n.t("desktop_system_title"))
+            self.header_subtitle_label.config(text=self.i18n.t("desktop_platform_subtitle").upper())
+            mode_text = self.i18n.t("real") if self.config.real_action_enabled else self.i18n.t("demo_mode_enabled")
+            self.header_mode_label.config(text=mode_text.upper())
+            self.header_contact_label.config(
+                text=f"{self.i18n.t('emergency_contact').upper()}: {self.config.emergency_number}"
+            )
+            self.header_language_button.config(text=self.i18n.language.upper())
         labels = {
             "monitor": self.i18n.t("monitor_tab"),
             "shelter": self.i18n.t("shelter_feed_tab"),
             "supplies": self.i18n.t("supplies_tab"),
             "settings": self.i18n.t("settings_tab"),
         }
+        stat_labels = {
+            "risk": self.i18n.t("risk"),
+            "alarm": self.i18n.t("alarm"),
+            "camera": self.i18n.t("camera"),
+            "systems": self.i18n.t("detection_systems"),
+        }
+        for stat_id, label in stat_labels.items():
+            stat_title = getattr(self, "stat_title_labels", {}).get(stat_id)
+            if stat_title is not None:
+                stat_title.config(text=label.upper())
         for tab_id, button in self.tab_buttons.items():
             selected = tab_id == self.current_tab
             button.config(
-                text=labels[tab_id],
-                bg="#0587f2" if selected else "#1f2b38",
-                fg="#ffffff",
-                activebackground="#0aa4ff",
-                activeforeground="#ffffff",
+                text=labels[tab_id].upper(),
+                bg=color("button_selected") if selected else color("button_bg"),
+                fg=color("button_text") if selected else color("text_muted"),
+                activebackground=color("button_selected_hover") if selected else color("button_hover"),
+                activeforeground=color("button_text"),
             )
 
         quick_access_labels = {
@@ -3566,7 +4107,7 @@ class TkRescueUI:
                 frame.config(text=self.i18n.t(frame_key))
             button = self.quick_access_buttons.get(window_id)
             if button is not None:
-                button.config(text=self.i18n.t(button_key))
+                button.config(text=self.i18n.t(button_key).upper())
 
         action_labels = {
             "cancel": self.i18n.t("button_cancel"),
@@ -3580,22 +4121,45 @@ class TkRescueUI:
             "quit": self.i18n.t("button_quit"),
         }
         for action, button in self.action_buttons.items():
+            action_bg = color("button_bg")
+            action_hover = color("button_hover")
+            if action in {"cancel", "confirm"}:
+                action_bg = color("danger")
+                action_hover = color("danger_hover")
+            elif action in {"auto_shelters", "google_search", "map"}:
+                action_bg = color("primary")
+                action_hover = color("button_selected_hover")
+            elif action == "add_shelter":
+                action_bg = color("success")
+                action_hover = color("success_hover")
             button.config(
-                text=action_labels[action],
-                bg="#263545",
-                fg="#ffffff",
-                activebackground="#36506a",
-                activeforeground="#ffffff",
+                text=action_labels[action].upper(),
+                bg=action_bg,
+                fg=color("button_text"),
+                activebackground=action_hover,
+                activeforeground=color("button_text"),
             )
-        self.shelter_form_frame.config(text=self.i18n.t("manual_shelter_header"))
+        self.shelter_form_title.config(text=self.i18n.t("manual_shelter_header").upper())
         for label_key, label in self.shelter_form_labels.items():
             label.config(text=self.i18n.t(label_key))
-        self.search_query_button.config(text=self.i18n.t("button_search"))
-        self.add_shelter_button.config(text=self.i18n.t("button_add_shelter"))
-        self.supplies_editor_frame.config(text=self.i18n.t("supplies_custom_header"))
+        self.search_query_button.config(
+            text=self.i18n.t("button_search").upper(),
+            bg=color("primary"),
+            activebackground=color("button_selected_hover"),
+        )
+        self.add_shelter_button.config(
+            text=self.i18n.t("button_add_shelter").upper(),
+            bg=color("success"),
+            activebackground=color("success_hover"),
+        )
+        self.supplies_editor_title.config(text=self.i18n.t("supplies_custom_header").upper())
         self.supplies_editor_hint.config(text=self.i18n.t("supplies_editor_hint"))
-        self.supplies_save_button.config(text=self.i18n.t("button_save_supplies"))
-        self.supplies_reset_button.config(text=self.i18n.t("button_reset_supplies"))
+        self.supplies_save_button.config(
+            text=self.i18n.t("button_save_supplies").upper(),
+            bg=color("success"),
+            activebackground=color("success_hover"),
+        )
+        self.supplies_reset_button.config(text=self.i18n.t("button_reset_supplies").upper())
         for window_id, window in self.popup_windows.items():
             try:
                 window.title(self._popup_title(window_id))
@@ -3624,19 +4188,25 @@ class TkRescueUI:
         self.shelter_form_frame.pack_forget()
         self.supplies_editor_frame.pack_forget()
         if target == "shelter":
-            self.shelter_form_frame.pack(fill="x", padx=12, pady=(0, 6), before=self.content_label)
+            self.shelter_form_frame.pack(fill="x", pady=(0, 10), before=self.content_label)
         elif target == "supplies":
-            self.supplies_editor_frame.pack(fill="x", padx=12, pady=(0, 6), before=self.content_label)
+            self.supplies_editor_frame.pack(fill="x", pady=(0, 10), before=self.content_label)
         self._visible_form = target
 
     def _refresh_camera_preview_visibility(self) -> None:
         if not hasattr(self, "video_label") or not hasattr(self, "status_label"):
             return
         should_show = self.current_tab == "monitor"
+        if hasattr(self, "stats_frame") and should_show != self._stats_visible:
+            if should_show:
+                self.stats_frame.pack(fill="x", pady=(0, 10), before=self.status_label)
+            else:
+                self.stats_frame.pack_forget()
+            self._stats_visible = should_show
         if should_show == self._video_visible:
             return
         if should_show:
-            self.video_label.pack(fill="both", expand=True, padx=12, pady=4, before=self.status_label)
+            self.video_label.pack(fill="both", expand=True, pady=(0, 10), before=self.status_label)
         else:
             self.video_label.pack_forget()
         self._video_visible = should_show
@@ -3826,19 +4396,21 @@ class TkRescueUI:
         return self.i18n.t(title_keys.get(window_id, "app_title"))
 
     def _create_popup_window(self, window_id: str) -> None:
+        color = self.theme.color
+        font = self.theme.font
         win = tk.Toplevel(self.root)
         win.title(self._popup_title(window_id))
-        win.configure(bg="#0f1720")
+        win.configure(bg=color("panel_bg"))
         win.protocol("WM_DELETE_WINDOW", lambda wid=window_id: self._toggle_popup(wid))
         content = tk.Label(
             win,
-            bg="#0f1720",
-            fg="#d9e8f4",
+            bg=color("panel_bg"),
+            fg=color("text"),
             justify="left",
             anchor="nw",
             padx=14,
             pady=14,
-            font=("Segoe UI", 12),
+            font=font("body"),
             wraplength=900,
         )
         content.pack(fill="both", expand=True)
@@ -3890,9 +4462,340 @@ def open_camera(index: int) -> cv2.VideoCapture:
     return camera
 
 
+def _shelter_to_api(shelter: Shelter, distance_km: Optional[float] = None) -> dict[str, object]:
+    return {
+        "id": f"{shelter.source}:{shelter.name}:{shelter.address}",
+        "name": shelter.name,
+        "address": shelter.address,
+        "distanceKm": distance_km,
+        "distance": f"{distance_km:.2f} km" if distance_km is not None else "",
+        "lat": shelter.lat,
+        "lon": shelter.lon,
+        "note": shelter.note,
+        "phone": shelter.phone,
+        "googleMapsUri": shelter.google_maps_uri,
+        "source": shelter.source,
+    }
+
+
+class RestRescueRuntime:
+    """Runs monitoring without Tkinter and exposes state/actions for a web UI."""
+
+    def __init__(
+        self,
+        config: RescueConfig,
+        i18n: Translator,
+        camera: Optional[cv2.VideoCapture],
+        audio: AudioAnalyzer,
+        video: VideoAnalyzer,
+        gestures: GestureAnalyzer,
+        fusion: RiskFusion,
+        alarm: AlarmController,
+        recorder: EvidenceRecorder,
+        shelter_manager: ShelterManager,
+        supplies_manager: SuppliesManager,
+        account_manager: GoogleAccountManager,
+        camera_error: str = "",
+    ) -> None:
+        self.config = config
+        self.i18n = i18n
+        self.camera = camera
+        self.audio = audio
+        self.video = video
+        self.gestures = gestures
+        self.fusion = fusion
+        self.alarm = alarm
+        self.recorder = recorder
+        self.shelter_manager = shelter_manager
+        self.supplies_manager = supplies_manager
+        self.account_manager = account_manager
+        self.camera_error = camera_error
+        self.running = False
+        self.message = camera_error
+        self.saved_current_alarm = False
+        self.opened_map_for_current_alarm = False
+        self.latest_frame: Optional[np.ndarray] = None
+        self.latest_jpeg: Optional[bytes] = None
+        self.risk = 0.0
+        self.metrics: dict[str, Any] = self._default_metrics()
+        self.recent_events: list[dict[str, object]] = []
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self.running = False
+        if self._thread is not None:
+            self._thread.join(timeout=1.5)
+
+    def snapshot(self) -> Optional[bytes]:
+        with self._lock:
+            return self.latest_jpeg
+
+    def state(self) -> dict[str, object]:
+        with self._lock:
+            risk = self.risk
+            metrics = dict(self.metrics)
+            message = self.message
+            events = list(self.recent_events)
+            camera_online = self.camera is not None and not bool(self.camera_error)
+
+        alarm_active = bool(self.alarm.active)
+        supplies = [
+            {
+                "id": str(index + 1),
+                "name": title,
+                "detail": detail,
+                "checked": False,
+            }
+            for index, (title, detail) in enumerate(self.supplies_manager.current_items())
+        ]
+        shelters = [
+            _shelter_to_api(shelter, distance)
+            for shelter, distance in self.shelter_manager.ranked_shelters(limit=8)
+        ]
+        return {
+            "app": self.i18n.t("app_title"),
+            "language": self.i18n.language,
+            "languageName": self.i18n.language_name(),
+            "mode": "real" if self.config.real_action_enabled else "demo",
+            "demoMode": not self.config.real_action_enabled,
+            "riskScore": round(risk, 1),
+            "riskState": self.i18n.t("risk_elevated") if risk > 50 else self.i18n.t("risk_normal"),
+            "alarmActive": alarm_active,
+            "alarmRemainingSeconds": self.alarm.remaining_seconds,
+            "alarmStatus": self.i18n.t("active") if alarm_active else self.i18n.t("ready"),
+            "reason": self.fusion.last_reason,
+            "message": message,
+            "cameraOnline": camera_online,
+            "cameraError": self.camera_error,
+            "emergencyContact": self.config.emergency_number,
+            "metrics": metrics,
+            "events": events,
+            "shelterStatus": self.shelter_manager.google_status,
+            "shelters": shelters,
+            "goBagItems": supplies,
+            "googleAccount": self.account_manager.profile_label(),
+            "location": {
+                "lat": self.shelter_manager.user_lat,
+                "lon": self.shelter_manager.user_lon,
+            },
+            "urls": {
+                "snapshot": "/api/frame.jpg",
+                "stream": "/api/stream",
+            },
+            "updatedAt": time.time(),
+        }
+
+    def perform_action(self, action: str, payload: Optional[dict[str, Any]] = None) -> dict[str, object]:
+        payload = payload or {}
+        action = (action or "").strip()
+        message = ""
+
+        if action == "cancel":
+            self.alarm.cancel()
+            self.fusion.reset(self.i18n.t("alarm_cancelled"))
+            message = self.i18n.t("alarm_cancelled")
+        elif action == "confirm":
+            self.alarm.confirm_now()
+            message = self.alarm.status_message
+        elif action == "google_search":
+            message = self.shelter_manager.search_shelters(str(payload.get("query", "")).strip() or None)
+        elif action == "auto_shelters":
+            message = self.shelter_manager.auto_search_shelters_async()
+        elif action == "map":
+            message = self.shelter_manager.open_map()
+        elif action == "login":
+            message = self.account_manager.register_async()
+        elif action == "toggle_language":
+            self.i18n.toggle()
+            self._sync_i18n()
+            message = self.i18n.t("language_toggled", language=self.i18n.language_name())
+        elif action in {"uk_language", "en_language"}:
+            self.i18n.set_language("uk" if action == "uk_language" else "en")
+            self._sync_i18n()
+            message = self.i18n.t("language_toggled", language=self.i18n.language_name())
+        elif action == "set_language":
+            self.i18n.set_language(str(payload.get("language", self.i18n.language)))
+            self._sync_i18n()
+            message = self.i18n.t("language_toggled", language=self.i18n.language_name())
+        elif action == "set_location":
+            lat = parse_optional_float(str(payload.get("lat", "")))
+            lon = parse_optional_float(str(payload.get("lon", "")))
+            if lat is not None and lon is not None:
+                self.shelter_manager.set_user_location(lat, lon)
+                message = self.i18n.t("auto_location_found")
+            else:
+                message = self.i18n.t("auto_location_failed")
+        elif action == "add_shelter":
+            message = self.shelter_manager.add_shelter(
+                name=str(payload.get("name", "")),
+                address=str(payload.get("address", "")),
+                lat=parse_optional_float(str(payload.get("lat", ""))),
+                lon=parse_optional_float(str(payload.get("lon", ""))),
+                note=str(payload.get("note", "")),
+                phone=str(payload.get("phone", "")),
+            )
+        elif action == "save_supplies":
+            text = str(payload.get("text", ""))
+            self.supplies_manager.update_current_text(text)
+            message = self.supplies_manager.save()
+        elif action == "reset_supplies":
+            message = self.supplies_manager.reset_current()
+        else:
+            message = f"Unknown action: {action}"
+
+        with self._lock:
+            self.message = message
+        return {"ok": not message.startswith("Unknown action"), "message": message, "state": self.state()}
+
+    def _loop(self) -> None:
+        while self.running:
+            if self.camera is None:
+                self._idle_without_camera()
+                time.sleep(0.2)
+                continue
+
+            success, frame = self.camera.read()
+            if not success:
+                with self._lock:
+                    self.message = self.i18n.t("camera_read_failed")
+                    self.camera_error = self.message
+                time.sleep(0.2)
+                continue
+
+            frame = cv2.flip(frame, 1)
+            metrics = self._default_metrics()
+            self.shelter_manager.maybe_refresh_passively()
+
+            video_event, metrics = self.video.analyze(frame)
+            if video_event is not None:
+                self.fusion.add_video(video_event)
+                self._record_event("motion", video_event.event_type, "medium")
+
+            gesture_event = self.gestures.analyze(frame)
+            if gesture_event is not None:
+                self.fusion.add_gesture(gesture_event)
+                self._record_event("gesture", gesture_event.gesture, "high")
+
+            while True:
+                try:
+                    audio_event = self.audio.events.get_nowait()
+                except queue.Empty:
+                    break
+                self.fusion.add_audio(audio_event)
+                self._record_event("sound", audio_event.event_type, "high")
+
+            risk = self.fusion.update_idle()
+            if self.fusion.is_emergency and not self.alarm.active:
+                self.alarm.start(self.fusion.last_reason)
+                self.saved_current_alarm = False
+                self.opened_map_for_current_alarm = False
+
+            if self.alarm.active and self.config.save_evidence and not self.saved_current_alarm:
+                saved_path = self.recorder.save(frame, risk, self.fusion.last_reason)
+                self.message = self.i18n.t("evidence_saved", path=saved_path)
+                self.saved_current_alarm = True
+
+            if (
+                self.alarm.active
+                and self.config.open_shelter_map_on_alarm
+                and not self.opened_map_for_current_alarm
+            ):
+                self.message = self.shelter_manager.open_map()
+                self.opened_map_for_current_alarm = True
+
+            if not self.alarm.active:
+                self.saved_current_alarm = False
+                self.opened_map_for_current_alarm = False
+
+            self.alarm.tick()
+            latest_jpeg = self._encode_jpeg(frame)
+            with self._lock:
+                self.latest_frame = frame.copy()
+                self.latest_jpeg = latest_jpeg
+                self.risk = risk
+                self.metrics = metrics
+                self.camera_error = ""
+            time.sleep(0.015)
+
+    def _idle_without_camera(self) -> None:
+        while True:
+            try:
+                audio_event = self.audio.events.get_nowait()
+            except queue.Empty:
+                break
+            self.fusion.add_audio(audio_event)
+            self._record_event("sound", audio_event.event_type, "high")
+        risk = self.fusion.update_idle()
+        if self.fusion.is_emergency and not self.alarm.active:
+            self.alarm.start(self.fusion.last_reason)
+        self.alarm.tick()
+        with self._lock:
+            self.risk = risk
+            self.metrics = self._default_metrics()
+
+    def _record_event(self, event_type: str, description: str, severity: str) -> None:
+        event = {
+            "id": f"{time.time():.6f}",
+            "type": event_type,
+            "timestamp": time.time(),
+            "description": description,
+            "severity": severity,
+        }
+        with self._lock:
+            self.recent_events.insert(0, event)
+            self.recent_events = self.recent_events[:25]
+
+    def _sync_i18n(self) -> None:
+        for component in (
+            self.audio,
+            self.video,
+            self.gestures,
+            self.fusion,
+            self.alarm,
+            self.alarm.action,
+            self.shelter_manager,
+            self.supplies_manager,
+            self.account_manager,
+        ):
+            if hasattr(component, "i18n"):
+                component.i18n = self.i18n
+        if self.fusion.risk <= 0.0 and not self.alarm.active:
+            self.fusion.reset(self.i18n.t("monitoring"))
+        if not self.alarm.active:
+            self.alarm.status_message = self.i18n.t("monitoring")
+        if not getattr(self.account_manager, "_login_running", False):
+            self.account_manager.status_message = self.account_manager.status()
+
+    @staticmethod
+    def _default_metrics() -> dict[str, Any]:
+        return {
+            "motion": 0.0,
+            "flash": 0.0,
+            "brightness": 0.0,
+            "body_motion": 0.0,
+            "body_direction": "",
+            "body_collision": 0.0,
+            "body_hit": False,
+            "body_detected": False,
+        }
+
+    @staticmethod
+    def _encode_jpeg(frame: np.ndarray) -> Optional[bytes]:
+        success, encoded = cv2.imencode(".jpg", frame)
+        return encoded.tobytes() if success else None
+
+
 def _make_camera_http_handler(get_frame: Callable[[], Optional[bytes]]) -> type[BaseHTTPRequestHandler]:
     class CameraHTTPHandler(BaseHTTPRequestHandler):
-        server_version = "RescueCameraServer/1.0"
+        server_version = "StepPrepCameraServer/1.0"
 
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -3976,6 +4879,196 @@ def start_camera_server(get_frame: Callable[[], Optional[bytes]], port: int) -> 
     return server
 
 
+def _make_rest_http_handler(runtime: RestRescueRuntime, frontend_dir: str) -> type[BaseHTTPRequestHandler]:
+    frontend_root = Path(frontend_dir).resolve()
+
+    class RestHTTPHandler(BaseHTTPRequestHandler):
+        server_version = "StepPrepApiServer/1.0"
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+        def _cors(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+        def _send_json(self, payload: object, status: int = 200) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self._cors()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_bytes(self, data: bytes, content_type: str, status: int = 200) -> None:
+            self.send_response(status)
+            self._cors()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _read_json(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length <= 0:
+                return {}
+            raw = self.rfile.read(length)
+            if not raw:
+                return {}
+            data = json.loads(raw.decode("utf-8"))
+            return data if isinstance(data, dict) else {}
+
+        def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            self.send_response(204)
+            self._cors()
+            self.end_headers()
+
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            if path in ("/api/health", "/health"):
+                self._send_json({"ok": True, "app": "StepPrep", "mode": "api"})
+                return
+            if path in ("/api/status", "/api/state"):
+                self._send_json(runtime.state())
+                return
+            if path == "/api/shelters":
+                self._send_json({"shelters": runtime.state()["shelters"], "status": runtime.shelter_manager.google_status})
+                return
+            if path == "/api/supplies":
+                self._send_json({"items": runtime.state()["goBagItems"], "text": runtime.supplies_manager.current_text()})
+                return
+            if path == "/api/frame.jpg":
+                image = runtime.snapshot()
+                if image is None:
+                    self._send_json({"ok": False, "message": runtime.i18n.t("camera_read_failed")}, status=503)
+                    return
+                self._send_bytes(image, "image/jpeg")
+                return
+            if path == "/api/stream":
+                self._send_stream()
+                return
+            if path.startswith("/api/"):
+                self._send_json({"ok": False, "message": "Not found"}, status=404)
+                return
+            self._serve_static(path)
+
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            try:
+                payload = self._read_json()
+            except Exception as error:
+                self._send_json({"ok": False, "message": f"Invalid JSON: {error}"}, status=400)
+                return
+
+            if path == "/api/actions":
+                self._send_json(runtime.perform_action(str(payload.get("action", "")), payload))
+                return
+            if path == "/api/language":
+                self._send_json(runtime.perform_action("set_language", payload))
+                return
+            if path == "/api/location":
+                self._send_json(runtime.perform_action("set_location", payload))
+                return
+            if path == "/api/shelters":
+                self._send_json(runtime.perform_action("add_shelter", payload))
+                return
+            if path == "/api/supplies":
+                self._send_json(runtime.perform_action("save_supplies", payload))
+                return
+            self._send_json({"ok": False, "message": "Not found"}, status=404)
+
+        def do_PUT(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            self.do_POST()
+
+        def _send_stream(self) -> None:
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.end_headers()
+            boundary = b"--frame\r\n"
+            try:
+                while True:
+                    image = runtime.snapshot()
+                    if image is None:
+                        time.sleep(0.08)
+                        continue
+                    header = (
+                        b"Content-Type: image/jpeg\r\n"
+                        + b"Content-Length: "
+                        + str(len(image)).encode("ascii")
+                        + b"\r\n\r\n"
+                    )
+                    self.wfile.write(boundary)
+                    self.wfile.write(header)
+                    self.wfile.write(image)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+                    time.sleep(0.08)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception:
+                return
+
+        def _serve_static(self, request_path: str) -> None:
+            if not frontend_root.exists():
+                self._send_api_docs()
+                return
+
+            relative = urllib.parse.unquote(request_path.lstrip("/"))
+            target = frontend_root / (relative or "index.html")
+            if target.is_dir():
+                target = target / "index.html"
+            target = target.resolve()
+            if frontend_root != target and frontend_root not in target.parents:
+                self._send_json({"ok": False, "message": "Forbidden"}, status=403)
+                return
+            if not target.exists():
+                target = frontend_root / "index.html"
+            if not target.exists() or not target.is_file():
+                self._send_api_docs()
+                return
+
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            try:
+                self._send_bytes(target.read_bytes(), content_type)
+            except OSError as error:
+                self._send_json({"ok": False, "message": str(error)}, status=500)
+
+        def _send_api_docs(self) -> None:
+            body = (
+                "<!doctype html><html><head><meta charset=\"utf-8\"><title>StepPrep API</title></head>"
+                "<body style=\"font-family:Segoe UI,Arial,sans-serif;background:#0a0e17;color:#fff;\">"
+                "<h1>StepPrep REST API</h1>"
+                "<p>Build the Figma React app in <code>figma design</code> to serve it here, or call the API directly.</p>"
+                "<ul>"
+                "<li><a href=\"/api/status\">GET /api/status</a></li>"
+                "<li><a href=\"/api/shelters\">GET /api/shelters</a></li>"
+                "<li><a href=\"/api/supplies\">GET /api/supplies</a></li>"
+                "<li><a href=\"/api/frame.jpg\">GET /api/frame.jpg</a></li>"
+                "<li><a href=\"/api/stream\">GET /api/stream</a></li>"
+                "</ul>"
+                "</body></html>"
+            ).encode("utf-8")
+            self._send_bytes(body, "text/html; charset=utf-8")
+
+    return RestHTTPHandler
+
+
+def start_rest_api_server(
+    runtime: RestRescueRuntime,
+    host: str,
+    port: int,
+    frontend_dir: str,
+) -> ThreadingHTTPServer:
+    handler_class = _make_rest_http_handler(runtime, frontend_dir)
+    return ThreadingHTTPServer((host, port), handler_class)
+
+
 def start_demo_mode(camera: cv2.VideoCapture, port: int) -> None:
     stop_event = threading.Event()
     frame_container: dict[str, Optional[bytes]] = {"frame": None}
@@ -4036,13 +5129,76 @@ def main() -> None:
     account_manager = GoogleAccountManager(config, i18n)
 
     audio.start()
-    camera = open_camera(config.camera_index)
-    print(i18n.t("camera_opened_debug", index=config.camera_index, opened=camera.isOpened()))
+
+    camera: Optional[cv2.VideoCapture] = None
+    camera_error = ""
+    try:
+        camera = open_camera(config.camera_index)
+        print(i18n.t("camera_opened_debug", index=config.camera_index, opened=camera.isOpened()))
+    except Exception as error:
+        camera_error = i18n.t("camera_open_failed", index=config.camera_index)
+        print(f"{camera_error}: {error}")
+        if config.mode not in {"api", "rest"}:
+            audio.stop()
+            gestures.close()
+            raise
+
+    if config.mode == "demo":
+        if camera is None:
+            audio.stop()
+            gestures.close()
+            raise RuntimeError(camera_error)
+        try:
+            start_demo_mode(camera, config.server_port)
+        finally:
+            audio.stop()
+            gestures.close()
+            camera.release()
+        return
+
+    if config.mode in {"api", "rest"}:
+        runtime = RestRescueRuntime(
+            config,
+            i18n,
+            camera,
+            audio,
+            video,
+            gestures,
+            fusion,
+            alarm,
+            recorder,
+            shelter_manager,
+            supplies_manager,
+            account_manager,
+            camera_error=camera_error,
+        )
+        server: Optional[ThreadingHTTPServer] = None
+        try:
+            runtime.start()
+            server = start_rest_api_server(runtime, config.api_host, config.api_port, config.api_frontend_dir)
+            print(f"StepPrep REST API running at http://{config.api_host}:{config.api_port}/")
+            print("API endpoints: /api/status, /api/actions, /api/shelters, /api/supplies, /api/frame.jpg")
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("Stopping StepPrep REST API...")
+        finally:
+            if server is not None:
+                server.shutdown()
+                server.server_close()
+            runtime.stop()
+            audio.stop()
+            gestures.close()
+            if camera is not None:
+                camera.release()
+        return
+
     print(i18n.t("entering_main_loop"))
 
     server: Optional[ThreadingHTTPServer] = None
     server_thread: Optional[threading.Thread] = None
     try:
+        if camera is None:
+            raise RuntimeError(camera_error)
         ui = TkRescueUI(
             config,
             i18n,
@@ -4072,7 +5228,8 @@ def main() -> None:
             server.server_close()
         audio.stop()
         gestures.close()
-        camera.release()
+        if camera is not None:
+            camera.release()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import runpy
 import sys
-print('RUNNER: starting rescue app')
+print('RUNNER: starting StepPrep')
 try:
     runpy.run_path('c:\\Users\\Osana\\Documents\\1212\\rescue app.py', run_name='__main__')
 except Exception:

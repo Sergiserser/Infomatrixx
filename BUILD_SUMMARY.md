@@ -1,4 +1,4 @@
-# Emergency Rescue App - Build Summary
+# StepPrep - Build Summary
 
 ## ✅ Status: Ready to Run
 
